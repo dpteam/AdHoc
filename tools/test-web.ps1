@@ -102,6 +102,8 @@ try {
     Assert ($raw -notmatch '"ip"') 'public status has no IP field' ''
     Assert ($raw -notmatch '"idleSec"') 'public status has no idle/bytes fields' ''
     Assert ($raw -notmatch '"sessionId"') 'no session ids leak' ''
+    Assert ($raw -match '"relay"') 'public status mentions the relay' ''
+    Assert ($raw -notmatch '"pdpFrames"') 'public relay info is minimal' ''
 
     Assert ((Try-Request ($PublicBase + '/api/logs')) -eq 404) 'public: logs are hidden (404)' ''
     Assert ((Try-Request ($PublicBase + '/api/kick') 'POST' '{"id":"x"}') -eq 404) 'public: kick is hidden (404)' ''
@@ -165,6 +167,7 @@ try {
     $adminRaw = $adminStatus.Text
     Assert ($adminRaw -match '"mac"') 'admin sees MAC' ''
     Assert ($adminRaw -match '"ip"') 'admin sees IP' ''
+    Assert ($adminRaw -match '"pdpFrames"') 'admin sees full relay stats' ''
 
     # replay the same nonce
     $tsR = New-DptTimestamp

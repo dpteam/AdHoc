@@ -557,6 +557,13 @@ namespace Dpt.AdHoc.Net
             string resolved = _db.Resolve(rawCode);
             s.ProductCode = resolved;
             s.GameName = _db.DisplayName(resolved);
+            s.Hairpin = LocalNetwork.IsGateway(s.RemoteIp);
+            if (s.Hairpin)
+            {
+                Log.Warn("PROTO", "NAT hairpin suspected for " + s.Nickname + ": source " + s.RemoteIp +
+                                  " is this machine's gateway, peers cannot reach it directly. " +
+                                  "Enable 'Try to use server-provided packet relay' in PPSSPP.");
+            }
             s.State = SessionState.LoggedIn;
             s.LastPacketText = "LOGIN " + rawCode;
 
@@ -603,6 +610,12 @@ namespace Dpt.AdHoc.Net
                               " game=" + rawCode + (resolved != rawCode ? "->" + resolved : "") +
                               " (" + s.GameName + ")");
             _state.AddEvent("join", s.Nickname + " started playing " + s.GameName, resolved, s.GameName, s.Nickname);
+            if (s.Hairpin)
+            {
+                _state.AddEvent("hint",
+                    s.Nickname + " looks like NAT hairpin (source " + s.RemoteIp +
+                    ") - enable packet relay in PPSSPP settings", resolved, s.GameName, s.Nickname);
+            }
             if (newGame)
                 _state.AddEvent("game.new", "New game on the board: " + s.GameName, resolved, s.GameName, s.Nickname);
             if (duplicate != null)

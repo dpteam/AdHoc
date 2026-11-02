@@ -83,6 +83,7 @@ namespace Dpt.AdHoc
             _app.State = new ServerState(cfg);
 
             _app.Adhoc = new AdhocServer(_app);
+            _app.Relay = new RelayServer(_app);
             _app.WebPublic = new WebServer(_app, WebRole.Public);
             _app.WebAdmin = new WebServer(_app, WebRole.Admin);
 
@@ -101,6 +102,17 @@ namespace Dpt.AdHoc
                 return _exitCode;
             }
 
+            if (cfg.RelayEnabled)
+            {
+                if (!_app.Relay.Start())
+                    Log.Warn("APP", "packet relay did not start (port " + cfg.RelayPort + " busy?); " +
+                                    "hairpin/NAT players will not be able to use relay mode");
+            }
+            else
+            {
+                Log.Info("APP", "packet relay is disabled in config (relay.enabled=false)");
+            }
+
             if (!_app.WebPublic.Start())
                 Log.Error("APP", "public web board could not start; the protocol server keeps running");
 
@@ -112,6 +124,7 @@ namespace Dpt.AdHoc
 
             Log.Info("APP", "ready. adhoc=" + _app.Adhoc.Port +
                             " public=" + _app.WebPublic.Port + " admin=" + _app.WebAdmin.Port +
+                            " relay=" + (cfg.RelayEnabled ? cfg.RelayPort.ToString(CultureInfo.InvariantCulture) : "off") +
                             " webRoot=" + _app.WebPublic.Root);
             Log.Info("APP", "public board: " + _app.WebPublic.BaseUrl);
             Log.Info("APP", "admin board : " + _app.WebAdmin.BaseUrl + "  (token: config.ini web.adminToken)");
@@ -231,6 +244,7 @@ namespace Dpt.AdHoc
 
             try { if (_app.WebPublic != null) _app.WebPublic.Stop(); } catch (Exception ex) { Log.Warn("APP", "public web stop: " + ex.Message); }
             try { if (_app.WebAdmin != null) _app.WebAdmin.Stop(); } catch (Exception ex) { Log.Warn("APP", "admin web stop: " + ex.Message); }
+            try { if (_app.Relay != null) _app.Relay.Stop(); } catch (Exception ex) { Log.Warn("APP", "relay stop: " + ex.Message); }
             try { if (_app.Adhoc != null) _app.Adhoc.Stop(); } catch (Exception ex) { Log.Warn("APP", "adhoc stop: " + ex.Message); }
 
             Log.Info("APP", "goodbye");

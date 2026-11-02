@@ -7,6 +7,7 @@
 
 ```
 adhoc  27312   <-- PSP / PPSSPP (TCP, бинарный протокол)
+relay  27313   <-- PPSSPP packet relay (TCP, для NAT hairpin / строгих NAT)
 public 44501   <-- публичная доска: read-only, без MAC/IP/логов/модерации (это порт для проброса)
 admin  44502   <-- админка для локалки: кик, чат, баны, каталог, лог протокола
 ```
@@ -23,6 +24,9 @@ admin  44502   <-- админка для локалки: кик, чат, бан�
 - Кросс-региональные игры (`crosslink`): EU/JP/US копии попадают в одно лобби.
 - Таймауты сессий, лимиты на IP и на всех, автоочистка пустых игр, дубли MAC.
 - Мягкий режим: неизвестный опкод не убивает сессию, а логируется.
+- **Ретранслятор** (`aemu_postoffice`, TCP 27313): игровой трафик идёт через сервер —
+  лечит NAT hairpin (игра через свой внешний IP), CGNAT и «два игрока за одним роутером».
+  Подробности и настройка PPSSPP — [docs/RELAY.md](docs/RELAY.md).
 
 **Публичная доска (`44501`)**
 - Игры → группы → ники, кто во что играет, сколько времени в игре, кто хост.
@@ -56,6 +60,8 @@ run.cmd
   При первом запуске токен и соль генерируются автоматически и печатаются в консоль.
 
 В PPSSPP: **Сеть → Ad Hoc → Включить**, «Пользовательский сервер» → адрес машины, порт **27312**.
+Если играете через свой внешний адрес и лобби «видит, но не коннектит» — включите
+**Настройки → Сеть → «Try to use server-provided packet relay» = Да** (см. [docs/RELAY.md](docs/RELAY.md)).
 
 > .NET Framework 4.0+ (на XP SP3 — именно 4.0). Сборка стоковым `csc.exe`, без NuGet/MSBuild.
 
@@ -73,6 +79,7 @@ tools\firewall.cmd
 | Правило | Порт | Источники |
 |---|---|---|
 | `DPT.PSP AdHoc` | 27312 | любые (игроки из интернета) |
+| `DPT.PSP Relay` | 27313 | любые (игроки из интернета, если играют через релей) |
 | `DPT.PSP Public board` | 44501 | LAN/приватные (NPM рядом) |
 | `DPT.PSP Admin board` | 44502 | только LAN/приватные |
 
@@ -109,6 +116,11 @@ tools\firewall.cmd
 Это прикладная защита, **не замена TLS** — публичную доску всё равно публикуйте через HTTPS.
 Полное описание и границы: [docs/SECURITY.md](docs/SECURITY.md).
 
+Отдельно про ретранслятор: он пересылает **открытый** игровой трафик (как оригинальный
+`aemu_postoffice`), порт 27313 открыт для любых адресов, аутентификация — по MAC из
+adhoc-логина. Это осознанный компромисс ради совместимости с PPSSPP; подробности и лимиты —
+[docs/RELAY.md](docs/RELAY.md).
+
 ## Настройки (`config.ini`)
 
 Файл создаётся рядом с `AdHocServer.exe` при первом запуске (пример — `config.example.ini`).
@@ -122,6 +134,9 @@ tools\firewall.cmd
 | `server.emptyGameTtlMin` | `15` | сколько пустая игра висит на доске |
 | `server.ignoreUnknownOpcodes` | `true` | мягкий режим протокола |
 | `server.kickDuplicateMac` | `false` | кикать старую сессию при дубле MAC |
+| `relay.enabled` / `relay.port` | `true` / `27313` | ретранслятор игрового трафика |
+| `relay.maxSessions` / `maxPerIp` | `512` / `128` | лимиты релея (у игрока несколько сокетов) |
+| `relay.idleSeconds` / `lifetimeSeconds` | `600` / `43200` | таймауты релея |
 | `web.publicPort` / `publicPortFallbacks` | `44501` / `44503,44505` | публичная доска |
 | `web.adminPort` / `adminPortFallbacks` | `44502` / `44504,44506` | админка |
 | `web.publicBind` / `adminBind` | `0.0.0.0` | `127.0.0.1` — только локально |
@@ -183,6 +198,8 @@ src/AdHocServer/
   Net/Protocol.cs                  опкоды и сборка пакетов S2C
   Net/ClientSession.cs             TCP-сессия, буфер, send-lock
   Net/AdhocServer.cs               протокол, группы, чат, баны, таймауты
+  Net/RelayServer.cs               aemu_postoffice relay (TCP 27313)
+  Core/LocalNetwork.cs             адреса/шлюзы (детект NAT hairpin)
   Web/HttpCore.cs                  HTTP/1.1: запрос, ответ, keep-alive, chunked
   Web/WebServer.cs                 листенер, роль, прокси, статика, gzip, auth
   Web/WebApi.cs                    публичный (redacted) и админский API
@@ -193,6 +210,7 @@ public/assets/js/crypto.js         SHA-256/HMAC/PBKDF2/CTR на ES5
 public/assets/js/auth.js           клиент админского API (подпись + шифрование)
 data/games.json                    база названий (создаётся/правится автоматически)
 tools/test-client.ps1              тест протокола
+tools/test-relay.ps1               тест релея (PDP + PTP handshake, байты в обе стороны)
 tools/test-web.ps1                 тест обеих досок (вычистка, подпись, replay, шифрование)
 tools/admin-api.ps1                клиент админского API для PowerShell
 tools/firewall.cmd / .ps1          правила Windows Firewall для трёх портов
@@ -200,6 +218,7 @@ tools/hold-client.ps1              «держатель» сессии для р
 docs/PROTOCOL.md                   байтовый формат пакетов
 docs/ARCHITECTURE.md               потоки, блокировки, отказоустойчивость
 docs/API.md                        HTTP API
+docs/RELAY.md                      ретранслятор: зачем, как включить, протокол
 docs/SECURITY.md                   модель угроз, подпись/шифрование, reverse proxy
 ```
 
@@ -234,6 +253,7 @@ powershell -File tools\test-web.ps1
 | «нужен admin token» / 401 | токен из `config.ini` → `web.adminToken`; проверьте часы (окно ±180 с) |
 | 403 на админке | вы не в приватной сети (`web.adminPrivateOnly`) |
 | PPSSPP не видит лобби | порт 27312, IP сервера, игра запущена; в логе будет `LOGIN` |
+| Играю через свой внешний IP, лобби видит, но не коннектит | NAT hairpin: включите в PPSSPP «Try to use server-provided packet relay» (порт 27313), см. [docs/RELAY.md](docs/RELAY.md) |
 | Игроки одной игры не видят друг друга | разные региональные ID → добавьте crosslink в каталоге |
 | Нет иконок | нет CDN; положите Font Awesome локально в `public/assets/vendor/` |
 | Нет звука | autoplay блокируется до первого клика по странице |

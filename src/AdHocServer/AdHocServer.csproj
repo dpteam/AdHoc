@@ -45,6 +45,7 @@
     <Compile Include="Core\Config.cs" />
     <Compile Include="Core\GameDatabase.cs" />
     <Compile Include="Core\Json.cs" />
+    <Compile Include="Core\LocalNetwork.cs" />
     <Compile Include="Core\Log.cs" />
     <Compile Include="Core\ServerApp.cs" />
     <Compile Include="Core\ServerState.cs" />
@@ -52,6 +53,7 @@
     <Compile Include="Net\AdhocServer.cs" />
     <Compile Include="Net\ClientSession.cs" />
     <Compile Include="Net\Protocol.cs" />
+    <Compile Include="Net\RelayServer.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Web\HttpCore.cs" />

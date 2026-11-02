@@ -232,6 +232,7 @@ namespace Dpt.AdHoc.Web
                 jb.Prop("cpus", Environment.ProcessorCount);
                 jb.Prop("memoryMB", Math.Round(app.WorkingSetBytes / 1048576.0, 1));
                 jb.Prop("logLevel", Log.MinLevel.ToString());
+                jb.Prop("relayPort", app.Relay != null && app.Relay.IsRunning ? app.Relay.Port : 0);
             }
             jb.EndObject();
 
@@ -342,6 +343,28 @@ namespace Dpt.AdHoc.Web
             jb.Prop("eventSeq", seq);
             jb.EndObject();
 
+            jb.Name("relay").BeginObject();
+            if (app.Relay != null && app.Relay.IsRunning)
+            {
+                jb.Prop("enabled", true);
+                jb.Prop("sessions", app.Relay.SessionCount);
+                if (!redact)
+                {
+                    jb.Prop("port", app.Relay.Port);
+                    jb.Prop("maxSessions", cfg.RelayMaxSessions);
+                    jb.Prop("pairs", app.Relay.PtpPairs);
+                    jb.Prop("pdpFrames", app.Relay.PdpFrames);
+                    jb.Prop("pdpDrops", app.Relay.PdpDrops);
+                    jb.Prop("bytesIn", app.Relay.BytesIn);
+                    jb.Prop("bytesOut", app.Relay.BytesOut);
+                }
+            }
+            else
+            {
+                jb.Prop("enabled", false);
+            }
+            jb.EndObject();
+
             jb.Name("recent").BeginArray();
             lock (st.Sync)
             {
@@ -439,6 +462,7 @@ namespace Dpt.AdHoc.Web
                 jb.Prop("pings", s.Pings);
             }
             jb.Prop("isHost", isHost);
+            if (!redact) jb.Prop("hairpin", s.Hairpin);
             jb.EndObject();
         }
 

@@ -1189,3 +1189,16 @@ input[type="range"]::-moz-range-thumb {
 .auth-card .btn { height: 32px; justify-content: center; }
 .auth-error { min-height: 14px; font-size: 11px; color: var(--err); }
 .auth-card small { font-size: 10.5px; color: var(--muted); line-height: 1.45; }
+
+/* --------------------------------------------------------------- relay/hint */
+
+.chip.hairpin {
+  margin-left: 6px;
+  color: var(--warn);
+  border-color: rgba(176, 116, 26, .45);
+  background: rgba(176, 116, 26, .14);
+  text-transform: none;
+}
+.chip.hairpin i { font-size: 9px; }
+
+.feed .li.t-hint .ico { color: var(--info); }

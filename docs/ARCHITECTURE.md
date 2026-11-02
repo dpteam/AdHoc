@@ -13,6 +13,7 @@ Program (bootstrap, аргументы, shutdown)
  ├── GameDatabase      data/games.json  (product id -> название, crosslink)
  ├── ServerState       игры/группы/сессии/история/события   [lock Sync]
  ├── AdhocServer       TCP 27312, протокол, группы, баны, таймауты
+ ├── RelayServer       TCP 27313, PPSSPP-релей (aemu_postoffice)
  ├── WebServer(Public) TCP 44501, read-only, вычищенные данные
  ├── WebServer(Admin)  TCP 44502, подпись+шифрование, полный доступ
  ├── WebApi            разветвление public/admin, JSON/XML
@@ -32,6 +33,9 @@ Program (bootstrap, аргументы, shutdown)
 | `adhoc-accept` | AdhocServer | `AcceptTcpClient`, по клиенту — свой поток |
 | `adhoc-<id>` | AdhocServer | блокирующий `Read` сессии, разбор пакетов |
 | `adhoc-maintenance` | AdhocServer | раз в 2 c: пустые игры, баны, зависшие сессии |
+| `relay-accept` | RelayServer | TCP 27313, по соединению — свой поток |
+| `relay-<id>` | RelayServer | сессия релея: INIT, PDP/PTP, пересылка байт |
+| `relay-maintenance` | RelayServer | раз в 5 c: idle/lifetime сессий |
 | `web-public-accept` | WebServer | TCP 44501 → ThreadPool |
 | `web-admin-accept` | WebServer | TCP 44502 → ThreadPool |
 | `supervisor` | AppSupervisor | раз в 2 c проверяет все листенеры, перезапускает |
@@ -212,10 +216,14 @@ Log.Info("NET", "...")  ->  LogEntry (ring, seq)  ->  Trace.WriteLine(formatted)
 | UI (обе доски) | `public/index.html`, `public/admin.html`, `public/assets/js/app.js` |
 | вход в админку | `public/assets/js/auth.js`, `public/admin.html` (auth gate) |
 | звуки | `public/assets/js/sound.js` (пресеты — `PRESETS`) |
+| релей (PDP/PTP, лимиты) | `Net/RelayServer.cs`, `docs/RELAY.md` |
+| детект NAT hairpin | `Core/LocalNetwork.cs`, `AdhocServer.HandleLogin` |
 
 ## Тесты
 
 - `tools/test-client.ps1` — протокол (LOGIN/CONNECT/SCAN/CHAT/DISCONNECT, BSSID, crosslink).
+- `tools/test-relay.ps1` — релей: PDP-пересылка с переписыванием MAC/порта, полный
+  PTP handshake (listen → connect → accept), байты в обе стороны, закрытие пары, мусорный INIT.
 - `tools/test-web.ps1` — обе доски: вычистка публичного JSON, скрытые эндпоинты,
   gzip/ETag/304, подпись, sealed-ответы, replay, битая подпись, кик, чат, каталог.
 - `tools/admin-api.ps1` — клиент админского API (грузит `ApiCrypto` прямо из exe,

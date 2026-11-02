@@ -54,11 +54,16 @@
                "gameName": "Monster Hunter Freedom", "player": "Kai",
                "text": "Kai started playing Monster Hunter Freedom" }],
   "unknownIds": [],
+  "relay": { "enabled": true, "sessions": 0 },
   "config": { "theme": "light", "sound": true, "refreshMs": 2000, "timeoutSec": 25,
               "maxUsers": 256, "dbGames": 162, "dbCrosslinks": 115,
               "role": "public", "auth": false }
 }
 ```
+
+`relay` в публичном ответе — только `enabled` и число сессий. В админском добавляются
+`port`, `maxSessions`, `pairs`, `pdpFrames`, `pdpDrops`, `bytesIn`, `bytesOut`
+(см. [RELAY.md](RELAY.md)).
 
 Типы событий в публичной ленте: `join`, `leave`, `game.new`, `group.join`, `group.leave`.
 

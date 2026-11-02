@@ -79,3 +79,34 @@ public\HTML на красивом CSS JS fas fa ease стиль как у Facebo
 
 Что осознанно не делалось: TLS внутри сервера (терминируется на NPM), 2FA/TOTP, HTTPS для
 adhoc-порта (ограничение PPSSPP).
+---
+
+## Итерация 3 — ретранслятор для NAT hairpin
+
+Проблема из практики: PPSSPP, подключённый к своему же внешнему адресу изнутри LAN,
+приходит на сервер с source `192.168.1.1` (роутер после hairpin-NAT). Сервер раздаёт этот
+IP пирам, те стучатся в роутер — игра «видит лобби, но не коннектит».
+
+Сделано:
+
+- [x] **PPSSPP relay (aemu_postoffice)** на TCP `27313`: полноценный сервер протокола
+      (INIT/PDP/PTP_LISTEN/PTP_CONNECT/PTP_ACCEPT), PDP-кадры с переписыванием MAC/порта,
+      сведение PTP-пары в туннель, лимиты и таймауты. Совместимо с PPSSPP
+      `AdhocServerRelayMode=Yes` / `RelayAdhocServerList`, `AdhocUseUdp=No`.
+      Реализация: `Net/RelayServer.cs`, протокол и настройка — `docs/RELAY.md`.
+- [x] **Детект NAT hairpin**: если источник игрока совпадает со шлюзом этой машины
+      (`Core/LocalNetwork.cs`), в лог идёт предупреждение, в админской доске у игрока
+      появляется чип `hairpin`, в ленте — событие `hint` (без звука). Публичная доска
+      этого не показывает.
+- [x] Настройки `[relay]` в `config.ini` (enabled/port/bind/лимиты/idle/lifetime),
+      UDP-проба порта с подсказкой «выключите AdhocUseUdp».
+- [x] Релей под присмотром supervisor'а, отдельный статус в консоли и в `/api/status`
+      (`relay` объект: публично — enabled+sessions, в админке — полная статистика).
+- [x] `tools/firewall.cmd` добавляет правило `DPT.PSP Relay` (TCP 27313) рядом с adhoc/public/admin.
+- [x] `tools/test-relay.ps1`: PDP-пересылка с проверкой MAC/порта, полный PTP-handshake,
+      байты в обе стороны, закрытие пары, мусорный INIT.
+- [x] Документация: `docs/RELAY.md`, обновлены README/ARCHITECTURE/API/PROTOCOL/SECURITY.
+
+Ограничения (осознанные): релей не шифрует (как оригинал), добавляет TCP-задержку, ест трафик
+сервера, и клиент должен сам включить relay-режим — сервер не может заставить PPSSPP его
+использовать. UDP/ENet-вариант (`AdhocUseUdp=Yes`) не поддержан.

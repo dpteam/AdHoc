@@ -48,6 +48,7 @@ namespace Dpt.AdHoc.Net
         public string RawProductCode = "";
         public string ProductCode = "";
         public string GameName = "";
+        public bool Hairpin;   // source address is this machine's gateway: NAT hairpin in play
         public SessionState State = SessionState.Waiting;
         public DateTime ConnectUtc = DateTime.UtcNow;
 

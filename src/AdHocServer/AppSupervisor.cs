@@ -28,6 +28,7 @@ namespace Dpt.AdHoc
         private readonly Watched _adhoc;
         private readonly Watched _publicWeb;
         private readonly Watched _adminWeb;
+        private readonly Watched _relay;
 
         public AppSupervisor(ServerApp app)
         {
@@ -50,17 +51,25 @@ namespace Dpt.AdHoc
                 IsRunning = delegate { return app.WebAdmin != null && app.WebAdmin.IsRunning; },
                 Restart = delegate { return app.WebAdmin != null && app.WebAdmin.Restart(); }
             };
+            _relay = new Watched
+            {
+                Name = "relay",
+                IsRunning = delegate { return app.Relay != null && app.Relay.IsRunning; },
+                Restart = delegate { return app.Relay != null && app.Relay.Restart(); }
+            };
         }
 
         public int AdhocRestarts { get { return _adhoc.Restarts; } }
         public int PublicRestarts { get { return _publicWeb.Restarts; } }
         public int AdminRestarts { get { return _adminWeb.Restarts; } }
+        public int RelayRestarts { get { return _relay.Restarts; } }
 
         public void Start()
         {
             if (_app.Adhoc != null) _app.Adhoc.Failed += OnAdhocFailed;
             if (_app.WebPublic != null) _app.WebPublic.Failed += OnPublicFailed;
             if (_app.WebAdmin != null) _app.WebAdmin.Failed += OnAdminFailed;
+            if (_app.Relay != null) _app.Relay.Failed += OnRelayFailed;
 
             _thread = new Thread(Loop);
             _thread.IsBackground = true;
@@ -76,6 +85,7 @@ namespace Dpt.AdHoc
             try { if (_app.Adhoc != null) _app.Adhoc.Failed -= OnAdhocFailed; } catch { }
             try { if (_app.WebPublic != null) _app.WebPublic.Failed -= OnPublicFailed; } catch { }
             try { if (_app.WebAdmin != null) _app.WebAdmin.Failed -= OnAdminFailed; } catch { }
+            try { if (_app.Relay != null) _app.Relay.Failed -= OnRelayFailed; } catch { }
         }
 
         private void OnAdhocFailed(object sender, EventArgs e)
@@ -88,6 +98,12 @@ namespace Dpt.AdHoc
         {
             _publicWeb.Fault = true;
             Log.Error("APP", "supervisor: public web listener reported a failure");
+        }
+
+        private void OnRelayFailed(object sender, EventArgs e)
+        {
+            _relay.Fault = true;
+            Log.Error("APP", "supervisor: relay listener reported a failure");
         }
 
         private void OnAdminFailed(object sender, EventArgs e)
@@ -110,12 +126,13 @@ namespace Dpt.AdHoc
                     Check(_adhoc, now);
                     Check(_publicWeb, now);
                     Check(_adminWeb, now);
+                    Check(_relay, now);
 
                     if ((now - lastMemoryLog).TotalMinutes >= 10)
                     {
                         lastMemoryLog = now;
                         Log.Info("APP", "health: " + Prefix(_app.Adhoc) + " || " + Prefix(_app.WebPublic) + " || " +
-                                        Prefix(_app.WebAdmin) + " || mem " +
+                                        Prefix(_app.WebAdmin) + " || " + Prefix(_app.Relay) + " || mem " +
                                         (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + "MB");
                     }
                 }
@@ -133,6 +150,8 @@ namespace Dpt.AdHoc
             {
                 Dpt.AdHoc.Net.AdhocServer adhoc = server as Dpt.AdHoc.Net.AdhocServer;
                 if (adhoc != null) return adhoc.StatusLine();
+                Dpt.AdHoc.Net.RelayServer relay = server as Dpt.AdHoc.Net.RelayServer;
+                if (relay != null) return relay.StatusLine();
                 Dpt.AdHoc.Web.WebServer web = server as Dpt.AdHoc.Web.WebServer;
                 if (web != null) return web.StatusLine();
             }

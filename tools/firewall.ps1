@@ -81,9 +81,13 @@ $values = Read-IniValues $ini
 $portAdhoc = 27312
 $portPublic = 44501
 $portAdmin = 44502
+$portRelay = 27313
+$relayEnabled = $true
 if ($values.ContainsKey('adhocport') -and $values['adhocport']) { $portAdhoc = [int]$values['adhocport'] }
 if ($values.ContainsKey('publicport') -and $values['publicport']) { $portPublic = [int]$values['publicport'] }
 if ($values.ContainsKey('adminport') -and $values['adminport']) { $portAdmin = [int]$values['adminport'] }
+if ($values.ContainsKey('relay.port') -and $values['relay.port']) { $portRelay = [int]$values['relay.port'] }
+if ($values.ContainsKey('relay.enabled') -and $values['relay.enabled'] -match '^(false|0|no|off)$') { $relayEnabled = $false }
 
 $bindPublic = if ($values.ContainsKey('publicbind')) { $values['publicbind'] } else { '0.0.0.0' }
 $bindAdmin = if ($values.ContainsKey('adminbind')) { $values['adminbind'] } else { '0.0.0.0' }
@@ -105,7 +109,8 @@ Add-Line ''
 Add-Line '=== DPT.PSP AdHoc Server - firewall setup ==='
 Add-Line ('config : ' + $(if (Test-Path $ini) { $ini } else { 'not found, using defaults' }))
 Add-Line ('exe    : ' + $(if (Test-Path $exe) { $exe } else { 'NOT FOUND (rules will be port-only)' }))
-Add-Line ('ports  : adhoc=' + $portAdhoc + ' public=' + $portPublic + ' admin=' + $portAdmin)
+Add-Line ('ports  : adhoc=' + $portAdhoc + ' public=' + $portPublic + ' admin=' + $portAdmin +
+          $(if ($relayEnabled) { ' relay=' + $portRelay } else { ' relay=off' }))
 Add-Line ('bind   : public=' + $bindPublic + ' admin=' + $bindAdmin)
 Add-Line ''
 
@@ -129,6 +134,15 @@ $rules = @(
         Note   = 'admin web board (LAN only)'
     }
 )
+
+if ($relayEnabled) {
+    $rules += @{
+        Name   = 'DPT.PSP Relay'
+        Port   = $portRelay
+        Remote = $(if ($AdhocLanOnly) { $lanRemote } else { $anyRemote })
+        Note   = 'PPSSPP packet relay (aemu_postoffice, TCP)'
+    }
+}
 
 $haveCmdlets = $null -ne (Get-Command New-NetFirewallRule -ErrorAction SilentlyContinue)
 
@@ -201,7 +215,7 @@ Add-Line ''
 Add-Line '--- listening sockets ---'
 try {
     $netstat = netstat -ano | Select-String 'LISTENING'
-    foreach ($port in @($portAdhoc, $portPublic, $portAdmin)) {
+    foreach ($port in @($portAdhoc, $portPublic, $portAdmin, $portRelay)) {
         $hit = $netstat | Where-Object { $_.Line -match (':' + $port + '\s') } | Select-Object -First 1
         if ($hit) {
             $addr = ($hit.Line -split '\s+')[2]

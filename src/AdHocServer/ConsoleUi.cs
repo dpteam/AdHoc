@@ -105,7 +105,7 @@ namespace Dpt.AdHoc
 
             string line = " online " + online + "/" + _app.Cfg.MaxUsers +
                           " | games " + games + " | groups " + groups +
-                          " | web " + _app.WebPublic.Port + "/" + _app.WebAdmin.Port + " | up " + Util.HumanDuration(_app.Uptime) +
+                          " | web " + _app.WebPublic.Port + "/" + _app.WebAdmin.Port + " | relay " + (_app.Relay == null ? 0 : _app.Relay.SessionCount) + " | up " + Util.HumanDuration(_app.Uptime) +
                           " | mem " + (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + "MB ";
             if (line.Length > width - 1) line = line.Substring(0, width - 1);
 
@@ -254,6 +254,7 @@ namespace Dpt.AdHoc
             Console.WriteLine("  protocol       : " + _app.Adhoc.StatusLine());
             Console.WriteLine("  public         : " + _app.WebPublic.StatusLine());
             Console.WriteLine("  admin          : " + _app.WebAdmin.StatusLine());
+            Console.WriteLine("  relay          : " + (_app.Relay != null ? _app.Relay.StatusLine() : "off"));
             Console.WriteLine("  admin token    : " + (string.IsNullOrEmpty(_app.Cfg.AdminToken) ? "MISSING (see config.ini)" : "set (config.ini: web.adminToken)"));
             Console.WriteLine("  game db        : " + _app.Db.Count + " titles / " + _app.Db.CrosslinkCount + " crosslinks");
             Console.WriteLine("  memory         : " + (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + " MB");

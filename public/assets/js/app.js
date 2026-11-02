@@ -288,6 +288,9 @@
         SoundFX.play('error');
         UI.toast('warn', 'Кик', e.text, 5000);
         break;
+      case 'hint':
+        // server advice (e.g. NAT hairpin) - feed only, no noise
+        break;
       default:
         SoundFX.play('chip');
         break;
@@ -306,6 +309,9 @@
     setText('#t-uptime', UI.fmtDuration(server.uptimeSec));
     setText('#t-port-adhoc', server.adhocPort || '–');
     setText('#t-port-web', server.webPort || '–');
+
+    var relay = data.relay || {};
+    setText('#t-relay', relay.enabled ? ('on ' + UI.fmtInt(relay.sessions || 0)) : 'off');
   }
 
   function setText(sel, value) {
@@ -354,9 +360,11 @@
 
   function renderAbout(data) {
     var server = data.server || {};
+    var relay = data.relay || {};
     setText('#a-adhoc', server.adhocPort || '–');
     setText('#a-version', 'v' + (server.version || '?'));
     setText('#a-uptime', UI.fmtDuration(server.uptimeSec));
+    setText('#a-relay', relay.enabled ? ('вкл · ' + UI.fmtInt(relay.sessions || 0) + ' сессий') : 'выкл');
   }
 
   function gamesSig(games) {
@@ -498,8 +506,11 @@
 
   function playerRow(p, isHost) {
     var crown = isHost ? '<span class="crown" title="Хост группы"><i class="fas fa-crown"></i></span>' : '';
+    var hairpin = (IS_ADMIN && p.hairpin)
+      ? '<span class="chip hairpin" title="Источник — шлюз этой машины (NAT hairpin). Включите ретранслятор в PPSSPP."><i class="fas fa-arrows-rotate"></i> hairpin</span>'
+      : '';
     var html = '<tr>' +
-      '<td class="nick">' + UI.esc(p.name) + crown + '</td>';
+      '<td class="nick">' + UI.esc(p.name) + crown + hairpin + '</td>';
 
     if (IS_ADMIN) {
       var idleWarn = (p.idleSec || 0) > 15 ? ' warn' : '';
@@ -613,6 +624,7 @@
       else if (e.type === 'chat') clsType = 't-chat';
       else if (e.type === 'error' || e.type === 'ban' || e.type === 'kick') clsType = 't-error';
       else if (e.type === 'group.join' || e.type === 'group.leave') clsType = 't-group';
+      else if (e.type === 'hint') clsType = 't-hint';
 
       var icon = 'fa-circle';
       if (e.type === 'join') icon = 'fa-right-to-bracket';
@@ -624,6 +636,7 @@
       else if (e.type === 'kick') icon = 'fa-shoe-prints';
       else if (e.type === 'group.join') icon = 'fa-layer-group';
       else if (e.type === 'group.leave') icon = 'fa-layer-minus';
+      else if (e.type === 'hint') icon = 'fa-lightbulb';
 
       html.push('<div class="li ' + clsType + '">' +
         '<span class="ico"><i class="fas ' + icon + '"></i></span>' +

@@ -68,6 +68,17 @@ namespace Dpt.AdHoc.Core
         public bool DefaultSound = true;
         public int RefreshMs = 2000;
 
+        // ---- relay (PPSSPP aemu_postoffice) ----
+        public bool RelayEnabled = true;
+        public int RelayPort = 27313;
+        public string RelayBind = "0.0.0.0";
+        public int RelayMaxSessions = 512;
+        public int RelayMaxPerIp = 128;
+        public int RelayIdleSeconds = 600;
+        public int RelayLifetimeSeconds = 43200;
+        public int RelayMaxPdpBytes = 16384;
+        public bool RelayUdpProbe = true;
+
         // ---- limits / abuse ----
         public int MaxFailedLoginsPerIp = 20;
         public int BanSeconds = 120;
@@ -165,6 +176,16 @@ namespace Dpt.AdHoc.Core
             c.RefreshMs = GetInt(kv, "web.refreshMs", c.RefreshMs);
             c.WebRoot = GetStr(kv, "web.webRoot", c.WebRoot);
 
+            c.RelayEnabled = GetBool(kv, "relay.enabled", c.RelayEnabled);
+            c.RelayPort = GetInt(kv, "relay.port", c.RelayPort);
+            c.RelayBind = NormalizeBind(GetStr(kv, "relay.bindAddress", c.RelayBind));
+            c.RelayMaxSessions = GetInt(kv, "relay.maxSessions", c.RelayMaxSessions);
+            c.RelayMaxPerIp = GetInt(kv, "relay.maxPerIp", c.RelayMaxPerIp);
+            c.RelayIdleSeconds = GetInt(kv, "relay.idleSeconds", c.RelayIdleSeconds);
+            c.RelayLifetimeSeconds = GetInt(kv, "relay.lifetimeSeconds", c.RelayLifetimeSeconds);
+            c.RelayMaxPdpBytes = GetInt(kv, "relay.maxPdpBytes", c.RelayMaxPdpBytes);
+            c.RelayUdpProbe = GetBool(kv, "relay.udpProbe", c.RelayUdpProbe);
+
             c.MaxFailedLoginsPerIp = GetInt(kv, "limits.maxFailedLoginsPerIp", c.MaxFailedLoginsPerIp);
             c.BanSeconds = GetInt(kv, "limits.banSeconds", c.BanSeconds);
             c.HistorySize = GetInt(kv, "limits.historySize", c.HistorySize);
@@ -198,6 +219,12 @@ namespace Dpt.AdHoc.Core
             if (string.IsNullOrEmpty(AdminSalt) || ApiCrypto.FromHex(AdminSalt) == null) AdminSalt = "";
             if (string.IsNullOrEmpty(PublicBind)) PublicBind = "0.0.0.0";
             if (string.IsNullOrEmpty(AdminBind)) AdminBind = "0.0.0.0";
+            RelayPort = Clamp(RelayPort, 1, 65535);
+            RelayMaxSessions = Clamp(RelayMaxSessions, 8, 8192);
+            RelayMaxPerIp = Clamp(RelayMaxPerIp, 1, 4096);
+            RelayIdleSeconds = Clamp(RelayIdleSeconds, 30, 86400);
+            RelayLifetimeSeconds = Clamp(RelayLifetimeSeconds, 60, 172800);
+            RelayMaxPdpBytes = Clamp(RelayMaxPdpBytes, 512, 65536);
             ListenBacklog = Clamp(ListenBacklog, 8, 4096);
             MaxUsers = Clamp(MaxUsers, 1, 4096);
             MaxUsersPerIp = Clamp(MaxUsersPerIp, 1, 4096);
@@ -485,6 +512,22 @@ namespace Dpt.AdHoc.Core
             sb.AppendLine("defaultSound=true");
             sb.AppendLine("refreshMs=2000");
             sb.AppendLine("webRoot=public");
+            sb.AppendLine();
+            sb.AppendLine("[relay]");
+            sb.AppendLine("; PPSSPP packet relay (aemu_postoffice, TCP). Needed for NAT hairpin and strict NATs.");
+            sb.AppendLine("; In PPSSPP set Network -> 'Try to use server-provided packet relay' = Yes.");
+            sb.AppendLine("enabled=true");
+            sb.AppendLine("; PPSSPP hardcodes this port (AEMU_POSTOFFICE_PORT), keep 27313");
+            sb.AppendLine("port=27313");
+            sb.AppendLine("bindAddress=0.0.0.0");
+            sb.AppendLine("maxSessions=512");
+            sb.AppendLine("maxPerIp=128");
+            sb.AppendLine("; Idle without a linked peer, seconds");
+            sb.AppendLine("idleSeconds=600");
+            sb.AppendLine("lifetimeSeconds=43200");
+            sb.AppendLine("maxPdpBytes=16384");
+            sb.AppendLine("; Log a hint if PPSSPP uses UDP/ENet relay mode (AdhocUseUdp=Yes) which we do not speak");
+            sb.AppendLine("udpProbe=true");
             sb.AppendLine();
             sb.AppendLine("[limits]");
             sb.AppendLine("maxFailedLoginsPerIp=20");

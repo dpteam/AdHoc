@@ -83,6 +83,25 @@ response body (опция) = тот же конверт, заголовок X-En
 - Никаких `netsh http add urlacl`: HTTP-сервер свой, слушает `TcpListener` на `0.0.0.0`.
   Достаточно разрешить `AdHocServer.exe` в фаерволе Windows.
 
+Пример для NGinx Proxy Manager (Custom Location или Advanced):
+
+```nginx
+proxy_pass http://192.168.1.250:44501;
+proxy_http_version 1.1;
+proxy_set_header Host $host;                 # не обязателен, сервер не проверяет Host
+proxy_set_header X-Real-IP $remote_addr;      # реальный клиент
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Prefix /adhoc;   # только если публикуете по под-пути
+proxy_read_timeout 30s;
+```
+
+Замечание про NAT hairpin: при доступе из своей же LAN через внешний IP клиент может
+выглядеть как LAN-адрес роутера, то есть как «доверенный прокси». Тогда подделанный
+`X-Forwarded-For` теоретически позволит обойти rate limit (и только его — подпись и токен
+это не затрагивает). В домашней сети это приемлемо; если критично — пробрасывайте порт
+только на NPM и не открывайте `44501` напрямую.
+
 ## Прочая веб-защита
 
 | Механизм | Где |

@@ -102,6 +102,7 @@ namespace Dpt.AdHoc.Net
         private readonly Dictionary<string, RelayConn> _sessions = new Dictionary<string, RelayConn>(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _perIp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _byMac = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _byMacSeen = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
 
         private TcpListener _listener;
         private UdpClient _udpProbe;
@@ -146,6 +147,21 @@ namespace Dpt.AdHoc.Net
             {
                 int count;
                 return _byMac.TryGetValue(key, out count) ? count : 0;
+            }
+        }
+
+        /// <summary>
+        /// When this MAC last had a relay session. Games reopen their PDP sockets every time the
+        /// in-game lobby is redone, so a momentary count of 0 does not mean "relay is off".
+        /// </summary>
+        public DateTime LastActivityForMac(byte[] mac)
+        {
+            if (mac == null) return DateTime.MinValue;
+            string key = MacKey(mac, 0);
+            lock (_sync)
+            {
+                DateTime seen;
+                return _byMacSeen.TryGetValue(key, out seen) ? seen : DateTime.MinValue;
             }
         }
 
@@ -450,7 +466,7 @@ namespace Dpt.AdHoc.Net
 
         private string HandlePdp(RelayConn c)
         {
-            string name = "PDP " + MacKey(c.Src, 0) + " " + c.Sport.ToString(CultureInfo.InvariantCulture);
+            string name = "PDP " + MacKey(c.Src, 0) + " " + KeyPort(c.Sport).ToString(CultureInfo.InvariantCulture);
             Register(c, name);
 
             byte[] header = new byte[PdpHeaderSize];
@@ -472,19 +488,28 @@ namespace Dpt.AdHoc.Net
                 Interlocked.Increment(ref c.Frames);
                 Interlocked.Increment(ref _pdpFrames);
 
-                string targetKey = "PDP " + MacKey(header, 0) + " " + dport.ToString(CultureInfo.InvariantCulture);
-                RelayConn target = null;
-                lock (_sync) { _sessions.TryGetValue(targetKey, out target); }
+                short delta;
+                RelayConn target = FindPdpTarget(header, dport, out delta);
 
                 if (target == null || target.Closed)
                 {
                     Interlocked.Increment(ref _pdpDrops);
+                    NotePdpDrop(header, dport);
                     continue;
+                }
+
+                // Different PPSSPP "Port offset" settings shift every port by a constant.
+                // Tell the receiver the sender port in its own offset space.
+                ushort outPort = c.Sport;
+                if (_cfg.RelayPortTranslation && delta != 0)
+                {
+                    outPort = unchecked((ushort)(c.Sport + delta));
+                    NotePortTranslation(c, target, delta);
                 }
 
                 byte[] frame = new byte[PdpHeaderSize + size];
                 Buffer.BlockCopy(c.Src, 0, frame, 0, 6);
-                WriteU16(frame, 8, c.Sport);
+                WriteU16(frame, 8, outPort);
                 WriteU32(frame, 10, size);
                 if (size > 0) Buffer.BlockCopy(payload, 0, frame, PdpHeaderSize, (int)size);
 
@@ -495,7 +520,7 @@ namespace Dpt.AdHoc.Net
 
         private string HandleListen(RelayConn c)
         {
-            string name = "PTP_LISTEN " + MacKey(c.Src, 0) + " " + c.Sport.ToString(CultureInfo.InvariantCulture);
+            string name = "PTP_LISTEN " + MacKey(c.Src, 0) + " " + KeyPort(c.Sport).ToString(CultureInfo.InvariantCulture);
             Register(c, name);
 
             // The client never sends anything on a listen socket; it only waits for 10-byte
@@ -518,7 +543,7 @@ namespace Dpt.AdHoc.Net
         {
             string connector = MacKey(c.Src, 0);
             string listener = MacKey(c.Dst, 0);
-            string listenKey = "PTP_LISTEN " + listener + " " + c.Dport.ToString(CultureInfo.InvariantCulture);
+            string listenKey = "PTP_LISTEN " + listener + " " + KeyPort(c.Dport).ToString(CultureInfo.InvariantCulture);
 
             RelayConn listenSession = null;
             DateTime deadline = DateTime.UtcNow.AddMilliseconds(ListenWaitMs);
@@ -530,20 +555,29 @@ namespace Dpt.AdHoc.Net
                     if (_sessions.TryGetValue(listenKey, out candidate) && !candidate.Closed)
                         listenSession = candidate;
                 }
+                if (listenSession == null) listenSession = FindUniqueSession(1, c.Dst);
                 if (listenSession != null) break;
                 Thread.Sleep(50);
             }
 
             if (listenSession == null) return "no-listener";
 
-            string name = "PTP_CONNECT " + connector + " " + c.Sport.ToString(CultureInfo.InvariantCulture) +
-                          " " + listener + " " + c.Dport.ToString(CultureInfo.InvariantCulture);
+            string name = "PTP_CONNECT " + connector + " " + KeyPort(c.Sport).ToString(CultureInfo.InvariantCulture) +
+                          " " + listener + " " + KeyPort(c.Dport).ToString(CultureInfo.InvariantCulture);
             Register(c, name);
             c.WaitingAccept = true;
 
+            short delta = PortDelta(listenSession.Sport, c.Dport);
+            ushort notifyPort = c.Sport;
+            if (_cfg.RelayPortTranslation && delta != 0)
+            {
+                notifyPort = unchecked((ushort)(c.Sport + delta));
+                NotePortTranslation(c, listenSession, delta);
+            }
+
             byte[] notice = new byte[NoticeSize];
             Buffer.BlockCopy(c.Src, 0, notice, 0, 6);
-            WriteU16(notice, 8, c.Sport);
+            WriteU16(notice, 8, notifyPort);
             if (!Send(listenSession, notice, 0, notice.Length))
             {
                 listenSession.Close("send-failed");
@@ -561,8 +595,8 @@ namespace Dpt.AdHoc.Net
 
         private string HandleAccept(RelayConn c)
         {
-            string connectKey = "PTP_CONNECT " + MacKey(c.Dst, 0) + " " + c.Dport.ToString(CultureInfo.InvariantCulture) +
-                                " " + MacKey(c.Src, 0) + " " + c.Sport.ToString(CultureInfo.InvariantCulture);
+            string connectKey = "PTP_CONNECT " + MacKey(c.Dst, 0) + " " + KeyPort(c.Dport).ToString(CultureInfo.InvariantCulture) +
+                                " " + MacKey(c.Src, 0) + " " + KeyPort(c.Sport).ToString(CultureInfo.InvariantCulture);
 
             RelayConn connectSession = null;
             lock (_sync)
@@ -573,16 +607,37 @@ namespace Dpt.AdHoc.Net
                     connectSession = candidate;
             }
 
+            if (connectSession == null)
+            {
+                // fall back to the single waiting connector for this pair (offset mismatch)
+                lock (_sync)
+                {
+                    foreach (KeyValuePair<string, RelayConn> kv in _sessions)
+                    {
+                        RelayConn candidate = kv.Value;
+                        if (candidate.Kind != 2 || candidate.Closed || !candidate.WaitingAccept || candidate.Peer != null)
+                            continue;
+                        if (MacKey(candidate.Src, 0) != MacKey(c.Dst, 0)) continue;
+                        if (MacKey(candidate.Dst, 0) != MacKey(c.Src, 0)) continue;
+                        if (connectSession != null) { connectSession = null; break; } // ambiguous
+                        connectSession = candidate;
+                    }
+                }
+            }
+
             if (connectSession == null) return "no-connect-waiting";
 
-            string name = "PTP_ACCEPT " + MacKey(c.Src, 0) + " " + c.Sport.ToString(CultureInfo.InvariantCulture) +
-                          " " + MacKey(c.Dst, 0) + " " + c.Dport.ToString(CultureInfo.InvariantCulture);
+            string name = "PTP_ACCEPT " + MacKey(c.Src, 0) + " " + KeyPort(c.Sport).ToString(CultureInfo.InvariantCulture) +
+                          " " + MacKey(c.Dst, 0) + " " + KeyPort(c.Dport).ToString(CultureInfo.InvariantCulture);
             Register(c, name);
 
+            // connector expects the listener port in its own offset space (stored at connect time)
             byte[] ackForConnect = new byte[NoticeSize];
             Buffer.BlockCopy(c.Src, 0, ackForConnect, 0, 6);
-            WriteU16(ackForConnect, 8, c.Sport);
+            WriteU16(ackForConnect, 8, connectSession.Dport);
 
+            // listener expects the connector port in its own offset space (already translated
+            // by the connect notice, so the ACCEPT init carries it)
             byte[] ackForAccept = new byte[NoticeSize];
             Buffer.BlockCopy(c.Dst, 0, ackForAccept, 0, 6);
             WriteU16(ackForAccept, 8, c.Dport);
@@ -597,6 +652,111 @@ namespace Dpt.AdHoc.Net
             Interlocked.Increment(ref _ptpPairs);
             RelayRaw(c);
             return "peer-closed";
+        }
+
+        // ------------------------------------------------------- port matching
+
+        private static ushort NormPort(ushort port) { return (ushort)(port % 10000); }
+
+        private ushort KeyPort(ushort port)
+        {
+            return _cfg.RelayPortTranslation ? NormPort(port) : port;
+        }
+
+        /// <summary>Signed 16-bit distance between the registered port and the port a sender used.</summary>
+        private static short PortDelta(ushort registered, ushort wanted)
+        {
+            int d = registered - wanted;
+            while (d > 32767) d -= 65536;
+            while (d < -32768) d += 65536;
+            return (short)d;
+        }
+
+        private RelayConn FindPdpTarget(byte[] header, ushort dport, out short delta)
+        {
+            delta = 0;
+            string key = "PDP " + MacKey(header, 0) + " " + KeyPort(dport).ToString(CultureInfo.InvariantCulture);
+            RelayConn target;
+            lock (_sync) { _sessions.TryGetValue(key, out target); }
+
+            if (target == null || target.Closed)
+            {
+                byte[] mac = new byte[6];
+                Buffer.BlockCopy(header, 0, mac, 0, 6);
+                target = FindUniqueSession(0, mac);
+            }
+
+            if (target == null || target.Closed) return null;
+            delta = PortDelta(target.Sport, dport);
+            return target;
+        }
+
+        /// <summary>Last resort for offsets that are not multiples of 10000: one session per MAC.</summary>
+        private RelayConn FindUniqueSession(int kind, byte[] mac)
+        {
+            string macKey = MacKey(mac, 0);
+            RelayConn found = null;
+            lock (_sync)
+            {
+                foreach (KeyValuePair<string, RelayConn> kv in _sessions)
+                {
+                    RelayConn c = kv.Value;
+                    if (c.Kind != kind || c.Closed) continue;
+                    if (!string.Equals(MacKey(c.Src, 0), macKey, StringComparison.Ordinal)) continue;
+                    if (found != null) return null; // ambiguous, better to drop than to guess
+                    found = c;
+                }
+            }
+            return found;
+        }
+
+        private readonly object _portHintLock = new object();
+        private readonly Dictionary<string, DateTime> _portHints = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+
+        private void NotePortTranslation(RelayConn from, RelayConn to, short delta)
+        {
+            string key = MacKey(from.Src, 0) + ">" + MacKey(to.Src, 0);
+            lock (_portHintLock)
+            {
+                DateTime last;
+                if (_portHints.TryGetValue(key, out last) && (DateTime.UtcNow - last).TotalSeconds < 600) return;
+                _portHints[key] = DateTime.UtcNow;
+                if (_portHints.Count > 200) _portHints.Clear();
+            }
+
+            string text = "PPSSPP port offsets differ (delta " + delta + ") between " +
+                          MacKey(from.Src, 0) + " and " + MacKey(to.Src, 0) +
+                          "; the relay translates them, but set the same 'Port offset' on every client " +
+                          "for the cleanest result.";
+            Log.Warn("RELAY", text);
+            try { _app.State.AddEvent("hint", text, "", "", ""); } catch { }
+        }
+
+        private readonly object _dropHintLock = new object();
+        private readonly Dictionary<string, DateTime> _dropHints = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// A PDP frame arrived for a MAC that never opened a relay session. In practice that means
+        /// the receiver plays direct UDP (relay off on their side), or its session is not up yet.
+        /// Warn once per destination MAC instead of silently dropping frames.
+        /// </summary>
+        private void NotePdpDrop(byte[] header, ushort dport)
+        {
+            string dst = MacKey(header, 0);
+            lock (_dropHintLock)
+            {
+                DateTime last;
+                if (_dropHints.TryGetValue(dst, out last) && (DateTime.UtcNow - last).TotalSeconds < 60) return;
+                _dropHints[dst] = DateTime.UtcNow;
+                if (_dropHints.Count > 200) _dropHints.Clear();
+            }
+
+            string text = "PDP frame (dst port " + dport + ") for " + dst +
+                          " dropped: no relay session for that player. They probably have " +
+                          "'Try to use server-provided packet relay' turned off, or their game has not " +
+                          "opened the session yet - enable the relay for every player.";
+            Log.Warn("RELAY", text);
+            try { _app.State.AddEvent("hint", text, "", "", ""); } catch { }
         }
 
         /// <summary>Bidirectional raw byte pump for a linked PTP pair.</summary>
@@ -653,6 +813,7 @@ namespace Dpt.AdHoc.Net
                 int macCount;
                 _byMac.TryGetValue(macKey, out macCount);
                 _byMac[macKey] = macCount + 1;
+                _byMacSeen[macKey] = DateTime.UtcNow;
             }
 
             c.Name = name;

@@ -1060,8 +1060,16 @@ namespace Dpt.AdHoc.Net
                     if ((DateTime.UtcNow - created).TotalSeconds < 10) continue;
 
                     int relayCount = 0;
+                    DateTime now = DateTime.UtcNow;
                     for (int m = 0; m < members.Count; m++)
-                        if (_app.Relay.CountForMac(members[m].Mac) > 0) relayCount++;
+                    {
+                        ClientSession ms = members[m];
+                        if (_app.Relay.CountForMac(ms.Mac) > 0) { relayCount++; continue; }
+                        // games recreate their PDP sockets when the lobby is redone; a short gap
+                        // must not look like "this player turned the relay off"
+                        double idle = (now - _app.Relay.LastActivityForMac(ms.Mac)).TotalSeconds;
+                        if (idle < 30) relayCount++;
+                    }
 
                     if (relayCount == 0 || relayCount == members.Count) continue;
 

@@ -163,6 +163,95 @@ try {
 }
 Assert ($closed) 'closing the acceptor closes the connector' ''
 
+# ------------------------------------------------- port offset mismatch
+# Desktop PPSSPP uses Port offset 0, Android uses 10000. The relay must still route.
+$pdpC = Connect-Relay
+$pdpD = Connect-Relay
+$pdpC.GetStream().Write((Build-Init 0 $macA 5011 $zero 0), 0, 24)
+$pdpD.GetStream().Write((Build-Init 0 $macB 15012 $zero 0), 0, 24)   # 5012 + 10000
+Start-Sleep -Milliseconds 500
+
+$payload2 = [Text.Encoding]::UTF8.GetBytes('offset test')
+$frame2 = New-Object byte[] (14 + $payload2.Length)
+[Array]::Copy($macB, 0, $frame2, 0, 6)
+[Array]::Copy([BitConverter]::GetBytes([uint16]5012), 0, $frame2, 8, 2)
+[Array]::Copy([BitConverter]::GetBytes([uint32]$payload2.Length), 0, $frame2, 10, 4)
+[Array]::Copy($payload2, 0, $frame2, 14, $payload2.Length)
+$pdpC.GetStream().Write($frame2, 0, $frame2.Length)
+
+$h3 = Read-Exact $pdpD 14
+$n3 = [BitConverter]::ToUInt32($h3, 10)
+$d3 = Read-Exact $pdpD ([int]$n3)
+$srcPort3 = [BitConverter]::ToUInt16($h3, 8)
+Assert ([Text.Encoding]::UTF8.GetString($d3) -eq 'offset test') 'PDP routed across port offsets' ''
+Assert ($srcPort3 -eq 15011) 'PDP source port translated into receiver space' ("port=" + $srcPort3)
+
+$listenD = Connect-Relay
+$listenD.GetStream().Write((Build-Init 1 $macB 16010 $zero 0), 0, 24)
+Start-Sleep -Milliseconds 400
+
+$connectC = Connect-Relay
+$connectC.GetStream().Write((Build-Init 2 $macA 6011 $macB 6010), 0, 24)
+
+$notice2 = Read-Exact $listenD 10
+Assert (([BitConverter]::ToUInt16($notice2, 8)) -eq 16011) 'PTP notice translated to listener offset space' ''
+
+$acceptD = Connect-Relay
+$acceptD.GetStream().Write((Build-Init 3 $macB 16010 $macA 16011), 0, 24)
+
+$ackC = Read-Exact $connectC 10
+$ackD = Read-Exact $acceptD 10
+Assert (([BitConverter]::ToUInt16($ackC, 8)) -eq 6010) 'connector got listener port in its own space' ''
+Assert (([BitConverter]::ToUInt16($ackD, 8)) -eq 16011) 'listener got connector port in its own space' ''
+
+$o1 = PtpFrame 'offset-ping'
+$acceptD.GetStream().Write($o1, 0, $o1.Length)
+$oh = Read-Exact $connectC 4
+$od = Read-Exact $connectC ([int][BitConverter]::ToUInt32($oh, 0))
+Assert ([Text.Encoding]::UTF8.GetString($od) -eq 'offset-ping') 'PTP data across port offsets' ''
+
+foreach ($cc in @($pdpC, $pdpD, $listenD, $connectC, $acceptD)) { try { $cc.Close() } catch { } }
+
+# --------------------------------------- replay of a real hairpin session
+# Straight from a live log: desktop client on 'Port offset 0' opened PDP port 1,
+# the other client on 'Port offset 10000' opened 10001 (same game port 1).
+# Before the fix every frame was counted as dropped and never delivered.
+$pdpR1 = Connect-Relay
+$pdpR2 = Connect-Relay
+$pdpR1.GetStream().Write((Build-Init 0 $macA 1 $zero 0), 0, 24)
+$pdpR2.GetStream().Write((Build-Init 0 $macB 10001 $zero 0), 0, 24)
+Start-Sleep -Milliseconds 500
+
+$payA = [Text.Encoding]::UTF8.GetBytes('worms broadcast')
+$frA = New-Object byte[] (14 + $payA.Length)
+[Array]::Copy($macB, 0, $frA, 0, 6)
+[Array]::Copy([BitConverter]::GetBytes([uint16]1), 0, $frA, 8, 2)
+[Array]::Copy([BitConverter]::GetBytes([uint32]$payA.Length), 0, $frA, 10, 4)
+[Array]::Copy($payA, 0, $frA, 14, $payA.Length)
+$pdpR1.GetStream().Write($frA, 0, $frA.Length)
+
+$hR1 = Read-Exact $pdpR2 14
+$nR1 = [BitConverter]::ToUInt32($hR1, 10)
+$dR1 = Read-Exact $pdpR2 ([int]$nR1)
+Assert ([Text.Encoding]::UTF8.GetString($dR1) -eq 'worms broadcast') 'live log replay: offset 0 -> offset 10000 delivered' ''
+Assert (([BitConverter]::ToUInt16($hR1, 8)) -eq 10001) 'live log replay: sender port seen in receiver space' ("port=" + [BitConverter]::ToUInt16($hR1, 8))
+
+$payB = [Text.Encoding]::UTF8.GetBytes('worms reply')
+$frB = New-Object byte[] (14 + $payB.Length)
+[Array]::Copy($macA, 0, $frB, 0, 6)
+[Array]::Copy([BitConverter]::GetBytes([uint16]10001), 0, $frB, 8, 2)
+[Array]::Copy([BitConverter]::GetBytes([uint32]$payB.Length), 0, $frB, 10, 4)
+[Array]::Copy($payB, 0, $frB, 14, $payB.Length)
+$pdpR2.GetStream().Write($frB, 0, $frB.Length)
+
+$hR2 = Read-Exact $pdpR1 14
+$nR2 = [BitConverter]::ToUInt32($hR2, 10)
+$dR2 = Read-Exact $pdpR1 ([int]$nR2)
+Assert ([Text.Encoding]::UTF8.GetString($dR2) -eq 'worms reply') 'live log replay: offset 10000 -> offset 0 delivered' ''
+Assert (([BitConverter]::ToUInt16($hR2, 8)) -eq 1) 'live log replay: reply port translated back to 1' ("port=" + [BitConverter]::ToUInt16($hR2, 8))
+
+foreach ($cc in @($pdpR1, $pdpR2)) { try { $cc.Close() } catch { } }
+
 # ---------------------------------------------------------------- bad init
 $bad = Connect-Relay
 $bad.GetStream().Write((Build-Init 99 $zero 1 $zero 1), 0, 24)

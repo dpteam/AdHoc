@@ -266,6 +266,7 @@ python tools/build_games_db.py --pspudb database.db --games data/games.json --ou
 | PPSSPP не видит лобби | порт 27312, IP сервера, игра запущена; в логе будет `LOGIN` |
 | Играю через свой внешний IP, лобби видит, но не коннектит | NAT hairpin: включите в PPSSPP «Try to use server-provided packet relay» (порт 27313), см. [docs/RELAY.md](docs/RELAY.md) |
 | Игроки одной игры не видят друг друга | разные региональные ID → добавьте crosslink в каталоге; **или смешанный транспорт** (один через relay, другой напрямую) — включите relay у всех, см. [docs/RELAY.md](docs/RELAY.md) |
+| Лобби видно, а **сессии в игре** — нет | разные `Network → Port offset` (десктоп `0`, Android `10000`): сервер переводит порты автоматически, но лучше выставить одинаковый offset у всех; см. [docs/RELAY.md](docs/RELAY.md#разные-port-offset--главная-причина-сессии-не-находятся-в-игре) |
 | Нет иконок | нет CDN; положите Font Awesome локально в `public/assets/vendor/` |
 | Нет звука | autoplay блокируется до первого клика по странице |
 

@@ -78,6 +78,7 @@ namespace Dpt.AdHoc.Core
         public int RelayLifetimeSeconds = 43200;
         public int RelayMaxPdpBytes = 16384;
         public bool RelayUdpProbe = true;
+        public bool RelayPortTranslation = true;
 
         // ---- limits / abuse ----
         public int MaxFailedLoginsPerIp = 20;
@@ -185,6 +186,7 @@ namespace Dpt.AdHoc.Core
             c.RelayLifetimeSeconds = GetInt(kv, "relay.lifetimeSeconds", c.RelayLifetimeSeconds);
             c.RelayMaxPdpBytes = GetInt(kv, "relay.maxPdpBytes", c.RelayMaxPdpBytes);
             c.RelayUdpProbe = GetBool(kv, "relay.udpProbe", c.RelayUdpProbe);
+            c.RelayPortTranslation = GetBool(kv, "relay.portTranslation", c.RelayPortTranslation);
 
             c.MaxFailedLoginsPerIp = GetInt(kv, "limits.maxFailedLoginsPerIp", c.MaxFailedLoginsPerIp);
             c.BanSeconds = GetInt(kv, "limits.banSeconds", c.BanSeconds);
@@ -526,6 +528,9 @@ namespace Dpt.AdHoc.Core
             sb.AppendLine("idleSeconds=600");
             sb.AppendLine("lifetimeSeconds=43200");
             sb.AppendLine("maxPdpBytes=16384");
+            sb.AppendLine("; PPSSPP clients may differ in Network -> Port offset (0 on desktop, 10000 on Android).");
+            sb.AppendLine("; Translate ports by that delta so their sessions match; false = strict aemu behaviour.");
+            sb.AppendLine("portTranslation=true");
             sb.AppendLine("; Log a hint if PPSSPP uses UDP/ENet relay mode (AdhocUseUdp=Yes) which we do not speak");
             sb.AppendLine("udpProbe=true");
             sb.AppendLine();

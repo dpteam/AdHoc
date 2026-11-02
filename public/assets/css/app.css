@@ -1080,3 +1080,112 @@ input[type="range"]::-moz-range-thumb {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+/* ------------------------------------------------------------- role / about */
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 20px;
+  font-size: 10.5px;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .22);
+  color: var(--topbar-text);
+  white-space: nowrap;
+}
+.role-pill i { font-size: 10px; opacity: .8; }
+.role-pill.admin {
+  background: rgba(255, 196, 80, .18);
+  border-color: rgba(255, 196, 80, .5);
+  color: #ffe2a8;
+}
+
+.about { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; }
+.about-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); }
+.about-row b { color: var(--text-soft); font-weight: 600; font-family: var(--font-mono); font-size: 11px; }
+.about-note {
+  margin-top: 4px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+/* ---------------------------------------------------------------- auth gate */
+
+.auth-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background:
+    radial-gradient(700px 340px at 50% 0%, rgba(74, 118, 168, .22), rgba(0, 0, 0, 0) 70%),
+    var(--scrim);
+  backdrop-filter: blur(3px);
+}
+.auth-gate[hidden] { display: none; }
+
+.auth-card {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-hi);
+  animation: pop .22s var(--ease);
+}
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  color: var(--text);
+}
+.auth-brand i { color: var(--accent); }
+.auth-brand span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: #ffcf7a;
+  background: rgba(255, 196, 80, .14);
+  border: 1px solid rgba(255, 196, 80, .4);
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+.auth-card p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.auth-card code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.auth-card input {
+  height: 34px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .4px;
+  outline: none;
+}
+.auth-card input:focus { border-color: var(--accent-hi); box-shadow: 0 0 0 3px var(--accent-soft); }
+.auth-card .btn { height: 32px; justify-content: center; }
+.auth-error { min-height: 14px; font-size: 11px; color: var(--err); }
+.auth-card small { font-size: 10.5px; color: var(--muted); line-height: 1.45; }

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light" data-role="admin">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>DPT.PSP · Admin</title>
+<link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="assets/css/app.css?v=6">
+</head>
+<body>
+
+<header class="topbar" id="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./" title="DPT.PSP AdHoc Server">
+      <span class="brand-mark"><i class="fas fa-tower-broadcast"></i></span>
+      <span class="brand-text">
+        <b>DPT.PSP</b>
+        <small>AdHoc Server</small>
+      </span>
+    </a>
+
+    <nav class="tabs" aria-label="Разделы">
+      <button class="tab active" id="tab-lobby" data-scroll="lobby"><i class="fas fa-gamepad"></i><span>Лобби</span></button>
+      <button class="tab" id="tab-catalog"><i class="fas fa-book-open"></i><span>Каталог игр</span></button>
+      <button class="tab" id="tab-settings"><i class="fas fa-sliders-h"></i><span>Настройки</span></button>
+      <button class="tab" id="tab-help"><i class="fas fa-circle-question"></i><span>Справка</span></button>
+    </nav>
+
+    <div class="top-right">
+      <span class="role-pill admin" title="Админская доска (только LAN)"><i class="fas fa-user-shield"></i> admin</span>
+      <span class="conn-pill" id="conn-pill" title="Состояние связи с сервером">
+        <span class="dot"></span><span class="txt">подключение…</span>
+      </span>
+      <button class="icon-btn" id="theme-btn" title="Сменить тему" aria-label="Сменить тему"><i class="fas fa-moon"></i></button>
+      <button class="icon-btn" id="sound-btn" title="Звуки включены" aria-label="Звуки"><i class="fas fa-volume-high"></i></button>
+    </div>
+  </div>
+
+  <div class="topbar-stats">
+    <span><i class="fas fa-clock"></i> uptime <b id="t-uptime">–</b></span>
+    <span><i class="fas fa-users"></i> online <b id="t-online">0</b></span>
+    <span><i class="fas fa-gamepad"></i> games <b id="t-games">0</b></span>
+    <span><i class="fas fa-bolt"></i> peak <b id="t-peak">0</b></span>
+    <span><i class="fas fa-layer-group"></i> groups <b id="t-groups">0</b></span>
+    <span class="right"><i class="fas fa-server"></i> adhoc <b id="t-port-adhoc">–</b> · web <b id="t-port-web">–</b></span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="stat-grid" id="stat-cards" aria-live="polite">
+    <div class="stat" data-card="online">
+      <div class="stat-ico i-blue"><i class="fas fa-users"></i></div>
+      <div class="stat-body"><span class="stat-label">Игроков онлайн</span><span class="stat-value" id="s-online">0</span></div>
+      <span class="stat-sub" id="s-online-sub">из 0</span>
+    </div>
+    <div class="stat" data-card="games">
+      <div class="stat-ico i-violet"><i class="fas fa-gamepad"></i></div>
+      <div class="stat-body"><span class="stat-label">Активных игр</span><span class="stat-value" id="s-games">0</span></div>
+      <span class="stat-sub" id="s-games-sub">0 групп</span>
+    </div>
+    <div class="stat" data-card="peak">
+      <div class="stat-ico i-green"><i class="fas fa-bolt"></i></div>
+      <div class="stat-body"><span class="stat-label">Пик онлайна</span><span class="stat-value" id="s-peak">0</span></div>
+      <span class="stat-sub" id="s-peak-sub">таймаут 25с</span>
+    </div>
+    <div class="stat" data-card="conn">
+      <div class="stat-ico i-amber"><i class="fas fa-plug"></i></div>
+      <div class="stat-body"><span class="stat-label">Всего коннектов</span><span class="stat-value" id="s-conn">0</span></div>
+      <span class="stat-sub" id="s-conn-sub">0 чатов</span>
+    </div>
+    <div class="stat" data-card="traffic">
+      <div class="stat-ico i-cyan"><i class="fas fa-right-left"></i></div>
+      <div class="stat-body"><span class="stat-label">Трафик</span><span class="stat-value" id="s-traffic">0 B</span></div>
+      <span class="stat-sub" id="s-traffic-sub">↓0 B ↑0 B</span>
+    </div>
+    <div class="stat" data-card="health">
+      <div class="stat-ico i-red"><i class="fas fa-heart-pulse"></i></div>
+      <div class="stat-body"><span class="stat-label">Отказоустойчивость</span><span class="stat-value" id="s-health">ok</span></div>
+      <span class="stat-sub" id="s-health-sub">ошибки 0 · баны 0</span>
+    </div>
+  </section>
+
+  <div class="columns">
+    <div class="col-main">
+
+      <section class="panel" id="lobby">
+        <div class="panel-head">
+          <h2><i class="fas fa-gamepad"></i> Игры онлайн</h2>
+          <div class="panel-tools">
+            <label class="search">
+              <i class="fas fa-search"></i>
+              <input type="search" id="search" placeholder="Поиск игры, ID, ника, MAC или IP…" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="check" title="Скрыть игры без игроков">
+              <input type="checkbox" id="only-active" checked><span></span>только с игроками
+            </label>
+            <select id="sort" title="Сортировка">
+              <option value="players">по игрокам</option>
+              <option value="name">по названию</option>
+              <option value="activity">по активности</option>
+            </select>
+            <button class="btn ghost" id="refresh-btn" title="Обновить сейчас (R)"><i class="fas fa-rotate"></i></button>
+          </div>
+        </div>
+        <div class="panel-body" id="games-list">
+          <div class="empty"><i class="fas fa-spinner fa-spin"></i> Загружаем лобби…</div>
+        </div>
+        <div class="panel-foot">
+          <span id="games-foot">–</span>
+          <span class="hint"><i class="fas fa-circle-info"></i> нажмите на игру, чтобы увидеть кто в какой группе</span>
+        </div>
+      </section>
+
+    </div>
+
+    <aside class="col-side">
+
+      <section class="panel compact">
+        <div class="panel-head"><h2><i class="fas fa-history"></i> Недавние игроки</h2>
+          <span class="panel-badge" id="recent-count">0</span>
+        </div>
+        <div class="panel-body list" id="recent-list">
+          <div class="empty small">пока пусто</div>
+        </div>
+      </section>
+
+      <section class="panel compact">
+        <div class="panel-head"><h2><i class="fas fa-bell"></i> События</h2>
+          <label class="check tiny" title="Звуки и всплывающие уведомления о событиях"><input type="checkbox" id="events-follow" checked><span></span>оповещать</label>
+        </div>
+        <div class="panel-body feed" id="events-list">
+          <div class="empty small">тишина…</div>
+        </div>
+      </section>
+
+      <section class="panel compact logs-panel">
+        <div class="panel-head">
+          <h2><i class="fas fa-terminal"></i> Протокол</h2>
+          <div class="log-tools">
+            <select id="log-level" title="Уровень">
+              <option value="all">все</option>
+              <option value="Info">info+</option>
+              <option value="Warn">warn+</option>
+              <option value="Error">error</option>
+            </select>
+            <button class="mini" id="log-pause" title="Пауза"><i class="fas fa-pause"></i></button>
+          </div>
+        </div>
+        <div class="log-view" id="log-view" aria-live="off"><div class="empty small">нет записей</div></div>
+      </section>
+
+    </aside>
+  </div>
+
+  <footer class="footer">
+    <span><b id="f-name">DPT.PSP AdHoc Server</b> <span id="f-version">v1.0.0</span> · <span id="f-build">–</span></span>
+    <span class="sep">·</span>
+    <span>PRO Online / PPSSPP adhocctl · .NET 4.0 · admin board</span>
+    <span class="sep">·</span>
+    <span id="f-uptime">uptime –</span>
+    <span class="right" id="f-host">–</span>
+  </footer>
+
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div class="modal-root" id="modal-root" hidden></div>
+
+<div class="auth-gate" id="auth-gate" hidden>
+  <form class="auth-card" id="auth-form" autocomplete="off">
+    <div class="auth-brand"><i class="fas fa-user-shield"></i> DPT.PSP <span>admin</span></div>
+    <p>Введите <b>admin token</b> из <code>config.ini</code> (<code>web.adminToken</code>).</p>
+    <input type="password" id="auth-token" placeholder="admin token" autocomplete="current-password" spellcheck="false">
+    <button class="btn" type="submit" id="auth-go"><i class="fas fa-unlock"></i> Войти</button>
+    <div class="auth-error" id="auth-error"></div>
+    <small>Токен не отправляется на сервер: браузер выводит из него ключ (PBKDF2 + соль) и подписывает каждый запрос. API-ответы приходят зашифрованными.</small>
+  </form>
+</div>
+
+<script src="assets/js/sound.js?v=6"></script>
+<script src="assets/js/ui.js?v=6"></script>
+<script src="assets/js/crypto.js?v=6"></script>
+<script src="assets/js/auth.js?v=6"></script>
+<script src="assets/js/app.js?v=6"></script>
+</body>
+</html>

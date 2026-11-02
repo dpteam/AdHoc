@@ -41,6 +41,7 @@
   <ItemGroup>
     <Compile Include="AppSupervisor.cs" />
     <Compile Include="ConsoleUi.cs" />
+    <Compile Include="Core\ApiCrypto.cs" />
     <Compile Include="Core\Config.cs" />
     <Compile Include="Core\GameDatabase.cs" />
     <Compile Include="Core\Json.cs" />

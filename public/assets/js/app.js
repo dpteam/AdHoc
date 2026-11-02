@@ -1,8 +1,14 @@
 /* =========================================================================
-   DPT.Agent AdHoc board - application logic (ES5, no frameworks)
+   DPT.PSP board - application logic (ES5, no frameworks).
+
+   One code base for both faces:
+     data-role="public"  read-only board, redacted API, no moderation controls
+     data-role="admin"   full board, signed + sealed API, auth gate
    ========================================================================= */
 (function () {
   'use strict';
+
+  var IS_ADMIN = !!(window.API && API.isAdmin);
 
   var App = {
     status: null,
@@ -17,12 +23,11 @@
     failures: 0,
     pollTimer: null,
     logTimer: null,
-    initialised: false,
+    started: false,
     search: '',
     onlyActive: true,
     sort: 'players',
-    notify: true,
-    eventsFollow: true
+    notify: true
   };
 
   var DEFAULTS = {
@@ -31,8 +36,7 @@
     volume: 0.55,
     events: { join: true, leave: true, game: true, chat: true, error: true },
     refresh: 2000,
-    logLevel: 'all',
-    adminToken: ''
+    logLevel: 'all'
   };
 
   /* ------------------------------------------------------------- settings */
@@ -45,8 +49,7 @@
       volume: DEFAULTS.volume,
       events: { join: true, leave: true, game: true, chat: true, error: true },
       refresh: DEFAULTS.refresh,
-      logLevel: DEFAULTS.logLevel,
-      adminToken: ''
+      logLevel: DEFAULTS.logLevel
     };
     if (s && typeof s === 'object') {
       if (s.theme) out.theme = s.theme;
@@ -59,7 +62,6 @@
       }
       if (s.refresh !== undefined && s.refresh !== null) out.refresh = Number(s.refresh) || 0;
       if (s.logLevel) out.logLevel = s.logLevel;
-      if (s.adminToken) out.adminToken = s.adminToken;
     }
     return out;
   }
@@ -80,6 +82,7 @@
 
   function updateSoundButton() {
     var btn = UI.$('#sound-btn');
+    if (!btn) return;
     var on = App.settings.sound;
     btn.innerHTML = '<i class="fas ' + (on ? 'fa-volume-high' : 'fa-volume-mute') + '"></i>';
     btn.title = on ? 'Звуки включены' : 'Звуки выключены';
@@ -87,11 +90,57 @@
   }
 
   function updateThemeButton() {
+    var btn = UI.$('#theme-btn');
+    if (!btn) return;
     var theme = UI.currentTheme();
     var icon = theme === 'light' ? 'fa-moon' : (theme === 'dark' ? 'fa-circle-half-stroke' : 'fa-sun');
-    var btn = UI.$('#theme-btn');
     btn.innerHTML = '<i class="fas ' + icon + '"></i>';
     btn.title = 'Тема: ' + (theme === 'light' ? 'светлая' : theme === 'dark' ? 'тёмная' : 'OLED');
+  }
+
+  /* ------------------------------------------------------------- auth gate */
+
+  function showGate(on, message) {
+    var gate = UI.$('#auth-gate');
+    if (!gate) return;
+    gate.hidden = !on;
+    if (on) {
+      var err = UI.$('#auth-error');
+      if (err) err.textContent = message || '';
+      var input = UI.$('#auth-token');
+      if (input) {
+        input.value = '';
+        setTimeout(function () { try { input.focus(); } catch (e) { } }, 60);
+      }
+    }
+  }
+
+  function bindGate() {
+    var form = UI.$('#auth-form');
+    if (!form) return;
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var input = UI.$('#auth-token');
+      var token = (input && input.value || '').trim();
+      if (!token) return;
+      var btn = UI.$('#auth-go');
+      if (btn) btn.disabled = true;
+      var errBox = UI.$('#auth-error');
+      if (errBox) errBox.textContent = 'выводим ключ…';
+      API.init(function (err) {
+        if (btn) btn.disabled = false;
+        if (err) {
+          if (errBox) errBox.textContent = err.message || 'не удалось войти';
+          SoundFX.play('error');
+          return;
+        }
+        showGate(false);
+        SoundFX.play('online');
+        start();
+        poll();
+        logTick();
+      }, token);
+    });
   }
 
   /* ---------------------------------------------------------------- polling */
@@ -101,8 +150,7 @@
       clearTimeout(App.pollTimer);
       App.pollTimer = null;
     }
-    var delay = immediate ? 30 : nextDelay();
-    App.pollTimer = setTimeout(poll, delay);
+    App.pollTimer = setTimeout(poll, immediate ? 30 : nextDelay());
   }
 
   function nextDelay() {
@@ -114,8 +162,8 @@
   }
 
   function poll() {
-    UI.getJson('/api/status', function (err, data) {
-      if (err || !data) {
+    API.get('/api/status', function (err, data) {
+      if (err) {
         onPollFailed(err);
         return;
       }
@@ -125,6 +173,12 @@
   }
 
   function onPollFailed(err) {
+    if (err && err.auth && IS_ADMIN) {
+      App.conn = 'bad';
+      setConnPill('bad', 'нужен вход');
+      showGate(true, 'сессия истекла, введите токен');
+      return;
+    }
     App.failures++;
     if (App.conn !== 'bad') {
       App.conn = 'bad';
@@ -159,6 +213,7 @@
     renderRecent(data.recent || []);
     renderEvents(data.events || []);
     renderFooter(data);
+    renderAbout(data);
   }
 
   var serverDefaultsApplied = false;
@@ -198,13 +253,11 @@
       }
     }
     if (App.lastEventSeq === 0) {
-      // first load: remember position, don't spam toasts for the backlog
       App.lastEventSeq = maxSeq;
       return;
     }
     App.lastEventSeq = maxSeq;
     if (fresh.length > 8) fresh = fresh.slice(fresh.length - 8);
-
     for (var j = 0; j < fresh.length; j++) notifyEvent(fresh[j]);
   }
 
@@ -246,40 +299,64 @@
   function renderTop(data) {
     var s = data.stats || {};
     var server = data.server || {};
-    UI.$('#t-online').textContent = UI.fmtInt(s.online);
-    UI.$('#t-games').textContent = UI.fmtInt(s.games);
-    UI.$('#t-peak').textContent = UI.fmtInt(s.peak);
-    UI.$('#t-groups').textContent = UI.fmtInt(s.groups);
-    UI.$('#t-uptime').textContent = UI.fmtDuration(server.uptimeSec);
-    UI.$('#t-port-adhoc').textContent = server.adhocPort || '–';
-    UI.$('#t-port-web').textContent = server.webPort || '–';
+    setText('#t-online', UI.fmtInt(s.online));
+    setText('#t-games', UI.fmtInt(s.games));
+    setText('#t-peak', UI.fmtInt(s.peak));
+    setText('#t-groups', UI.fmtInt(s.groups));
+    setText('#t-uptime', UI.fmtDuration(server.uptimeSec));
+    setText('#t-port-adhoc', server.adhocPort || '–');
+    setText('#t-port-web', server.webPort || '–');
+  }
+
+  function setText(sel, value) {
+    var el = UI.$(sel);
+    if (el) el.textContent = value;
   }
 
   function renderStats(data) {
     var s = data.stats || {};
     var cfg = data.config || {};
-    UI.$('#s-online').textContent = UI.fmtInt(s.online);
-    UI.$('#s-online-sub').textContent = 'из ' + UI.fmtInt(cfg.maxUsers || 0);
-    UI.$('#s-games').textContent = UI.fmtInt(s.games);
-    UI.$('#s-games-sub').textContent = UI.fmtInt(s.groups) + ' групп';
-    UI.$('#s-peak').textContent = UI.fmtInt(s.peak);
-    UI.$('#s-peak-sub').textContent = 'таймаут ' + (cfg.timeoutSec || 0) + 'с';
-    UI.$('#s-conn').textContent = UI.fmtInt(s.connections);
-    UI.$('#s-conn-sub').textContent = UI.fmtInt(s.chats) + ' сообщений';
-    var total = (s.bytesIn || 0) + (s.bytesOut || 0);
-    UI.$('#s-traffic').textContent = UI.fmtBytes(total);
-    UI.$('#s-traffic-sub').textContent = '↓ ' + UI.fmtBytes(s.bytesIn) + ' ↑ ' + UI.fmtBytes(s.bytesOut);
-    UI.$('#s-health').textContent = (s.protocolErrors || 0) === 0 ? 'ok' : 'внимание';
-    UI.$('#s-health-sub').textContent = 'ошибки ' + UI.fmtInt(s.protocolErrors) + ' · баны ' + UI.fmtInt(s.bans);
+    setText('#s-online', UI.fmtInt(s.online));
+    setText('#s-online-sub', 'из ' + UI.fmtInt(cfg.maxUsers || 0));
+    setText('#s-games', UI.fmtInt(s.games));
+    setText('#s-games-sub', UI.fmtInt(s.groups) + ' групп');
+    setText('#s-peak', UI.fmtInt(s.peak));
+    if (IS_ADMIN) setText('#s-peak-sub', 'таймаут ' + (cfg.timeoutSec || 0) + 'с');
+    setText('#s-conn', UI.fmtInt(s.connections));
+    setText('#s-conn-sub', UI.fmtInt(s.chats) + ' сообщений');
+
+    if (IS_ADMIN) {
+      var total = (s.bytesIn || 0) + (s.bytesOut || 0);
+      setText('#s-traffic', UI.fmtBytes(total));
+      setText('#s-traffic-sub', '↓ ' + UI.fmtBytes(s.bytesIn) + ' ↑ ' + UI.fmtBytes(s.bytesOut));
+      setText('#s-health', (s.protocolErrors || 0) === 0 ? 'ok' : 'внимание');
+      setText('#s-health-sub', 'ошибки ' + UI.fmtInt(s.protocolErrors) + ' · баны ' + UI.fmtInt(s.bans));
+    } else {
+      setText('#s-db', UI.fmtInt(cfg.dbGames));
+      setText('#s-db-sub', UI.fmtInt(cfg.dbCrosslinks) + ' регионов');
+      setText('#s-health', 'ok');
+      setText('#s-health-sub', 'сервер в сети');
+    }
   }
 
   function renderFooter(data) {
     var server = data.server || {};
-    UI.$('#f-name').textContent = server.name || 'DPT.Agent AdHoc Server';
-    UI.$('#f-version').textContent = 'v' + (server.version || '?');
-    UI.$('#f-build').textContent = server.build || '–';
-    UI.$('#f-uptime').textContent = 'uptime ' + UI.fmtDuration(server.uptimeSec);
-    UI.$('#f-host').textContent = (server.host || '') + ' · ' + (server.os || '') + ' · mem ' + (server.memoryMB || 0) + 'MB';
+    setText('#f-name', server.name || 'DPT.PSP AdHoc Server');
+    setText('#f-version', 'v' + (server.version || '?'));
+    setText('#f-build', server.build || '–');
+    setText('#f-uptime', 'uptime ' + UI.fmtDuration(server.uptimeSec));
+    if (IS_ADMIN) {
+      setText('#f-host', (server.host || '') + ' · ' + (server.os || '') + ' · mem ' + (server.memoryMB || 0) + 'MB');
+    } else {
+      setText('#f-host', 'public board · adhoc ' + (server.adhocPort || '?'));
+    }
+  }
+
+  function renderAbout(data) {
+    var server = data.server || {};
+    setText('#a-adhoc', server.adhocPort || '–');
+    setText('#a-version', 'v' + (server.version || '?'));
+    setText('#a-uptime', UI.fmtDuration(server.uptimeSec));
   }
 
   function gamesSig(games) {
@@ -290,11 +367,11 @@
       for (var j = 0; j < (g.groups || []).length; j++) {
         var gr = g.groups[j];
         var mem = [];
-        for (var k = 0; k < (gr.members || []).length; k++) mem.push(gr.members[k].id + ':' + gr.members[k].name);
-        groups.push(gr.name + '|' + gr.host + '|' + mem.join(','));
+        for (var k = 0; k < (gr.members || []).length; k++) mem.push((gr.members[k].id || '') + ':' + gr.members[k].name);
+        groups.push(gr.name + '|' + (gr.host || '') + '|' + mem.join(','));
       }
       var idle = [];
-      for (var z = 0; z < (g.idle || []).length; z++) idle.push(g.idle[z].id + ':' + g.idle[z].name);
+      for (var z = 0; z < (g.idle || []).length; z++) idle.push((g.idle[z].id || '') + ':' + g.idle[z].name);
       parts.push([g.id, g.name, g.known ? 1 : 0, g.players, groups.join('/'), idle.join(',')].join('~'));
     }
     return parts.join(';');
@@ -302,13 +379,14 @@
 
   function renderGames(games) {
     var host = UI.$('#games-list');
+    if (!host) return;
     var filtered = filterGames(games);
 
-    UI.$('#games-foot').textContent = 'показано ' + filtered.length + ' из ' + games.length +
-      ' игр · ' + (App.status && App.status.stats ? App.status.stats.online : 0) + ' игроков онлайн';
+    setText('#games-foot', 'показано ' + filtered.length + ' из ' + games.length +
+      ' игр · ' + (App.status && App.status.stats ? App.status.stats.online : 0) + ' игроков онлайн');
 
     var sig = gamesSig(games) + '#f=' + filtered.length + '#q=' + App.search + '#s=' + App.sort +
-      '#a=' + (App.onlyActive ? 1 : 0);
+      '#a=' + (App.onlyActive ? 1 : 0) + '#' + (IS_ADMIN ? 'a' : 'p');
     if (sig === App.gamesSig) {
       refreshLiveCounts(games);
       return;
@@ -337,12 +415,8 @@
       out.push(g);
     }
     out.sort(function (a, b) {
-      if (App.sort === 'name') {
-        return String(a.name).localeCompare(String(b.name), 'ru');
-      }
-      if (App.sort === 'activity') {
-        return String(b.lastActivityUtc).localeCompare(String(a.lastActivityUtc));
-      }
+      if (App.sort === 'name') return String(a.name).localeCompare(String(b.name), 'ru');
+      if (App.sort === 'activity') return String(b.lastActivityUtc).localeCompare(String(a.lastActivityUtc));
       if (b.players !== a.players) return b.players - a.players;
       return String(a.name).localeCompare(String(b.name), 'ru');
     });
@@ -355,6 +429,7 @@
     var i, j;
     for (i = 0; i < (g.groups || []).length; i++) {
       if (String(g.groups[i].name || '').toLowerCase().indexOf(q) >= 0) return true;
+      if (String(g.groups[i].host || '').toLowerCase().indexOf(q) >= 0) return true;
       for (j = 0; j < g.groups[i].members.length; j++) {
         var m = g.groups[i].members[j];
         if (String(m.name || '').toLowerCase().indexOf(q) >= 0) return true;
@@ -382,7 +457,7 @@
     html.push('<span class="game-meta-line">');
     html.push('<span class="chip id">' + UI.esc(g.id) + '</span>');
     if (g.rawId && g.rawId !== g.id) html.push('<span class="chip link" title="Crosslink региона"><i class="fas fa-link"></i>' + UI.esc(g.rawId) + '</span>');
-    if (!g.known) html.push('<span class="chip" data-name-game="' + UI.esc(g.id) + '" role="button" tabindex="0" title="Задать название"><i class="fas fa-pen"></i> назвать</span>');
+    if (!g.known && IS_ADMIN) html.push('<span class="chip" data-name-game="' + UI.esc(g.id) + '" role="button" tabindex="0" title="Задать название"><i class="fas fa-pen"></i> назвать</span>');
     html.push('<span>пик ' + UI.fmtInt(g.peak) + ' · всего ' + UI.fmtInt(g.totalPlayers) + '</span>');
     html.push('<span class="game-time" data-activity="' + UI.esc(g.id) + '">' + UI.ago(g.lastActivityUtc) + '</span>');
     html.push('</span></span>');
@@ -422,36 +497,45 @@
   }
 
   function playerRow(p, isHost) {
-    var idleWarn = (p.idleSec || 0) > 15 ? ' warn' : '';
-    return '<tr>' +
-      '<td class="nick">' + UI.esc(p.name) + (isHost ? '<span class="crown" title="Хост группы"><i class="fas fa-crown"></i></span>' : '') + '</td>' +
-      '<td class="mac">' + UI.esc(p.mac) + '</td>' +
-      '<td class="ip">' + UI.esc(p.ip) + '</td>' +
-      '<td class="dur" data-dur="' + UI.esc(p.id) + '">' + UI.fmtDuration(p.connectedSec) + '</td>' +
-      '<td class="idle' + idleWarn + '" data-idle="' + UI.esc(p.id) + '">idle ' + UI.fmtDuration(p.idleSec) + '</td>' +
-      '<td class="act"><button class="btn ghost sm" data-kick="' + UI.esc(p.id) + '" data-kick-name="' + UI.esc(p.name) +
-      '" data-kick-mac="' + UI.esc(p.mac) + '" title="Отключить"><i class="fas fa-plug-circle-xmark"></i></button></td>' +
-      '</tr>';
+    var crown = isHost ? '<span class="crown" title="Хост группы"><i class="fas fa-crown"></i></span>' : '';
+    var html = '<tr>' +
+      '<td class="nick">' + UI.esc(p.name) + crown + '</td>';
+
+    if (IS_ADMIN) {
+      var idleWarn = (p.idleSec || 0) > 15 ? ' warn' : '';
+      html += '<td class="mac">' + UI.esc(p.mac) + '</td>' +
+        '<td class="ip">' + UI.esc(p.ip) + '</td>' +
+        '<td class="dur" data-dur="' + UI.esc(p.id) + '">' + UI.fmtDuration(p.connectedSec) + '</td>' +
+        '<td class="idle' + idleWarn + '" data-idle="' + UI.esc(p.id) + '">idle ' + UI.fmtDuration(p.idleSec) + '</td>' +
+        '<td class="act"><button class="btn ghost sm" data-kick="' + UI.esc(p.id) + '" data-kick-name="' + UI.esc(p.name) +
+        '" data-kick-mac="' + UI.esc(p.mac) + '" title="Отключить"><i class="fas fa-plug-circle-xmark"></i></button></td>';
+    } else {
+      html += '<td class="dur" data-dur="' + UI.esc(p.name) + '">' + UI.fmtDuration(p.connectedSec) + '</td>';
+    }
+    html += '</tr>';
+    return html;
   }
 
   function refreshLiveCounts(games) {
-    var byId = {};
+    var byKey = {};
     for (var i = 0; i < games.length; i++) {
       var g = games[i];
       for (var j = 0; j < (g.groups || []).length; j++)
-        for (var k = 0; k < g.groups[j].members.length; k++) byId[g.groups[j].members[k].id] = g.groups[j].members[k];
-      for (var z = 0; z < (g.idle || []).length; z++) byId[g.idle[z].id] = g.idle[z];
+        for (var k = 0; k < g.groups[j].members.length; k++) {
+          var m = g.groups[j].members[k];
+          byKey[m.id || m.name] = m;
+        }
+      for (var z = 0; z < (g.idle || []).length; z++) byKey[g.idle[z].id || g.idle[z].name] = g.idle[z];
     }
+
     var durs = UI.$$('[data-dur]');
     for (var a = 0; a < durs.length; a++) {
-      var id = durs[a].getAttribute('data-dur');
-      var p = byId[id];
+      var p = byKey[durs[a].getAttribute('data-dur')];
       if (p) durs[a].textContent = UI.fmtDuration(p.connectedSec);
     }
     var idles = UI.$$('[data-idle]');
     for (var b = 0; b < idles.length; b++) {
-      var pid = idles[b].getAttribute('data-idle');
-      var q = byId[pid];
+      var q = byKey[idles[b].getAttribute('data-idle')];
       if (q) {
         idles[b].textContent = 'idle ' + UI.fmtDuration(q.idleSec);
         idles[b].className = 'idle' + ((q.idleSec || 0) > 15 ? ' warn' : '');
@@ -468,7 +552,8 @@
 
   function renderRecent(recent) {
     var host = UI.$('#recent-list');
-    UI.$('#recent-count').textContent = recent.length;
+    if (!host) return;
+    setText('#recent-count', recent.length);
     if (!recent.length) {
       host.innerHTML = '<div class="empty small">пока пусто</div>';
       return;
@@ -512,6 +597,7 @@
 
   function renderEvents(events) {
     var host = UI.$('#events-list');
+    if (!host) return;
     if (!events.length) {
       host.innerHTML = '<div class="empty small">тишина…</div>';
       return;
@@ -520,14 +606,13 @@
     var shown = 0;
     for (var i = events.length - 1; i >= 0 && shown < 40; i--, shown++) {
       var e = events[i];
-      var cls = 'li';
       var clsType = '';
-      if (e.type === 'join') { clsType = 't-join'; }
-      else if (e.type === 'leave') { clsType = 't-leave'; }
-      else if (e.type === 'game.new') { clsType = 't-game new'; }
-      else if (e.type === 'chat') { clsType = 't-chat'; }
-      else if (e.type === 'error' || e.type === 'ban' || e.type === 'kick') { clsType = 't-error'; }
-      else if (e.type === 'group.join' || e.type === 'group.leave') { clsType = 't-group'; }
+      if (e.type === 'join') clsType = 't-join';
+      else if (e.type === 'leave') clsType = 't-leave';
+      else if (e.type === 'game.new') clsType = 't-game new';
+      else if (e.type === 'chat') clsType = 't-chat';
+      else if (e.type === 'error' || e.type === 'ban' || e.type === 'kick') clsType = 't-error';
+      else if (e.type === 'group.join' || e.type === 'group.leave') clsType = 't-group';
 
       var icon = 'fa-circle';
       if (e.type === 'join') icon = 'fa-right-to-bracket';
@@ -540,7 +625,7 @@
       else if (e.type === 'group.join') icon = 'fa-layer-group';
       else if (e.type === 'group.leave') icon = 'fa-layer-minus';
 
-      html.push('<div class="' + cls + ' ' + clsType + '">' +
+      html.push('<div class="li ' + clsType + '">' +
         '<span class="ico"><i class="fas ' + icon + '"></i></span>' +
         '<span class="txt">' + UI.esc(e.text) + '<small>' + UI.clock(e.timeUtc) +
         (e.gameName ? ' · ' + UI.esc(e.gameName) : '') + '</small></span></div>');
@@ -552,19 +637,19 @@
   /* -------------------------------------------------------------------- logs */
 
   function logTick() {
-    if (App.logPaused) return;
+    if (!IS_ADMIN || App.logPaused) return;
+    if (!UI.$('#log-view')) return;
     var level = App.settings.logLevel || 'all';
     var url = '/api/logs?since=' + App.lastLogSeq + '&limit=250&level=' + encodeURIComponent(level);
-    UI.getJson(url, function (err, data) {
+    API.get(url, function (err, data) {
       if (err || !data || !data.lines || !data.lines.length) return;
-      var lines = data.lines;
-      for (var i = 0; i < lines.length; i++) {
-        App.logLines.push(lines[i]);
-        if (lines[i].seq > App.lastLogSeq) App.lastLogSeq = lines[i].seq;
+      for (var i = 0; i < data.lines.length; i++) {
+        App.logLines.push(data.lines[i]);
+        if (data.lines[i].seq > App.lastLogSeq) App.lastLogSeq = data.lines[i].seq;
       }
       if (App.logLines.length > 400) App.logLines = App.logLines.slice(App.logLines.length - 400);
       renderLogs();
-    }, 8000, App.settings.adminToken);
+    }, 8000);
   }
 
   function renderLogs() {
@@ -590,17 +675,19 @@
   function resetLogs() {
     App.lastLogSeq = 0;
     App.logLines = [];
-    UI.$('#log-view').innerHTML = '<div class="log-empty">нет записей</div>';
+    var view = UI.$('#log-view');
+    if (view) view.innerHTML = '<div class="log-empty">нет записей</div>';
     logTick();
   }
 
   /* ----------------------------------------------------------------- actions */
 
   function bind() {
-    document.addEventListener('pointerdown', unlockAudio, { once: false });
-    document.addEventListener('keydown', unlockAudio, { once: false });
+    document.addEventListener('pointerdown', unlockAudio, false);
+    document.addEventListener('keydown', unlockAudio, false);
 
-    UI.$('#theme-btn').addEventListener('click', function () {
+    var themeBtn = UI.$('#theme-btn');
+    if (themeBtn) themeBtn.addEventListener('click', function () {
       var theme = UI.nextTheme();
       App.settings.theme = theme;
       UI.setTheme(theme);
@@ -610,7 +697,8 @@
       UI.toast('info', 'Тема: ' + (theme === 'light' ? 'светлая' : theme === 'dark' ? 'тёмная' : 'OLED'), '', 1800);
     });
 
-    UI.$('#sound-btn').addEventListener('click', function () {
+    var soundBtn = UI.$('#sound-btn');
+    if (soundBtn) soundBtn.addEventListener('click', function () {
       App.settings.sound = !App.settings.sound;
       SoundFX.setEnabled(App.settings.sound);
       updateSoundButton();
@@ -619,20 +707,24 @@
       UI.toast(App.settings.sound ? 'ok' : 'info', App.settings.sound ? 'Звуки включены' : 'Звуки выключены', '', 1800);
     });
 
-    UI.$('#tab-lobby').addEventListener('click', function () {
+    var tabLobby = UI.$('#tab-lobby');
+    if (tabLobby) tabLobby.addEventListener('click', function () {
       var el = UI.$('#lobby');
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setActiveTab('tab-lobby');
       SoundFX.play('click');
     });
 
-    UI.$('#tab-catalog').addEventListener('click', function () { openCatalog(); });
-    UI.$('#tab-settings').addEventListener('click', function () { openSettings(); });
-    UI.$('#tab-help').addEventListener('click', function () { openHelp(); });
+    var tabCatalog = UI.$('#tab-catalog');
+    if (tabCatalog) tabCatalog.addEventListener('click', function () { openCatalog(); });
+    var tabSettings = UI.$('#tab-settings');
+    if (tabSettings) tabSettings.addEventListener('click', function () { openSettings(); });
+    var tabHelp = UI.$('#tab-help');
+    if (tabHelp) tabHelp.addEventListener('click', function () { openHelp(); });
 
     var search = UI.$('#search');
     var searchTimer = null;
-    search.addEventListener('input', function () {
+    if (search) search.addEventListener('input', function () {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(function () {
         App.search = search.value;
@@ -641,87 +733,96 @@
       }, 160);
     });
 
-    UI.$('#only-active').addEventListener('change', function (e) {
+    var onlyActive = UI.$('#only-active');
+    if (onlyActive) onlyActive.addEventListener('change', function (e) {
       App.onlyActive = e.target.checked;
       App.gamesSig = '';
       if (App.status) renderGames(App.status.games || []);
       SoundFX.play('chip');
     });
 
-    UI.$('#sort').addEventListener('change', function (e) {
+    var sort = UI.$('#sort');
+    if (sort) sort.addEventListener('change', function (e) {
       App.sort = e.target.value;
       App.gamesSig = '';
       if (App.status) renderGames(App.status.games || []);
     });
 
-    UI.$('#refresh-btn').addEventListener('click', function () {
+    var refreshBtn = UI.$('#refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () {
       SoundFX.play('click');
       poll();
       logTick();
     });
 
-    UI.$('#events-follow').addEventListener('change', function (e) {
+    var eventsFollow = UI.$('#events-follow');
+    if (eventsFollow) eventsFollow.addEventListener('change', function (e) {
       App.notify = e.target.checked;
       UI.store('dpt.notify', App.notify);
       if (App.notify) SoundFX.play('click');
     });
 
-    UI.$('#log-level').addEventListener('change', function (e) {
+    var logLevel = UI.$('#log-level');
+    if (logLevel) logLevel.addEventListener('change', function (e) {
       App.settings.logLevel = e.target.value;
       saveSettings();
       resetLogs();
     });
 
-    UI.$('#log-pause').addEventListener('click', function () {
+    var logPause = UI.$('#log-pause');
+    if (logPause) logPause.addEventListener('click', function () {
       App.logPaused = !App.logPaused;
-      var btn = UI.$('#log-pause');
-      btn.innerHTML = '<i class="fas ' + (App.logPaused ? 'fa-play' : 'fa-pause') + '"></i>';
-      btn.title = App.logPaused ? 'Продолжить' : 'Пауза';
+      logPause.innerHTML = '<i class="fas ' + (App.logPaused ? 'fa-play' : 'fa-pause') + '"></i>';
+      logPause.title = App.logPaused ? 'Продолжить' : 'Пауза';
       if (!App.logPaused) logTick();
     });
 
-    UI.$('#games-list').addEventListener('click', function (e) {
-      var nameBtn = closest(e.target, '[data-name-game]');
-      if (nameBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        openNameGame(nameBtn.getAttribute('data-name-game'));
-        return;
-      }
-      var kickBtn = closest(e.target, '[data-kick]');
-      if (kickBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        askKick(kickBtn.getAttribute('data-kick'), kickBtn.getAttribute('data-kick-name'), kickBtn.getAttribute('data-kick-mac'));
-        return;
-      }
-      var head = closest(e.target, '.game-head');
-      if (head) {
-        var id = head.getAttribute('data-toggle');
-        if (id) {
-          App.openGames[id] = !App.openGames[id];
-          var art = head.parentNode;
-          if (art) {
-            art.className = 'game' + (App.openGames[id] ? ' open' : '') + (hasPlayers(id) ? ' live' : '');
-            head.setAttribute('aria-expanded', App.openGames[id] ? 'true' : 'false');
-          }
-          SoundFX.play('chip');
+    var gamesList = UI.$('#games-list');
+    if (gamesList) {
+      gamesList.addEventListener('click', function (e) {
+        var nameBtn = closest(e.target, '[data-name-game]');
+        if (nameBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          openNameGame(nameBtn.getAttribute('data-name-game'));
+          return;
         }
-      }
-    });
+        var kickBtn = closest(e.target, '[data-kick]');
+        if (kickBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          askKick(kickBtn.getAttribute('data-kick'), kickBtn.getAttribute('data-kick-name'), kickBtn.getAttribute('data-kick-mac'));
+          return;
+        }
+        var head = closest(e.target, '.game-head');
+        if (head) {
+          var id = head.getAttribute('data-toggle');
+          if (id) {
+            App.openGames[id] = !App.openGames[id];
+            var art = head.parentNode;
+            if (art) {
+              art.className = 'game' + (App.openGames[id] ? ' open' : '') + (hasPlayers(id) ? ' live' : '');
+              head.setAttribute('aria-expanded', App.openGames[id] ? 'true' : 'false');
+            }
+            SoundFX.play('chip');
+          }
+        }
+      });
 
-    UI.$('#games-list').addEventListener('keydown', function (e) {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      var head = closest(e.target, '.game-head');
-      if (head) { e.preventDefault(); head.click(); }
-    });
+      gamesList.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var head = closest(e.target, '.game-head');
+        if (head) { e.preventDefault(); head.click(); }
+      });
+    }
 
     document.addEventListener('keydown', function (e) {
       var tag = (e.target && e.target.tagName || '').toLowerCase();
       var typing = tag === 'input' || tag === 'textarea' || tag === 'select';
       if (e.key === '/' && !typing) {
         e.preventDefault();
-        UI.$('#search').focus();
+        var s = UI.$('#search');
+        if (s) s.focus();
       } else if ((e.key === 'r' || e.key === 'R') && !typing && !e.ctrlKey && !e.metaKey) {
         poll();
         logTick();
@@ -757,16 +858,15 @@
     for (var i = 0; i < tabs.length; i++) tabs[i].className = 'tab' + (tabs[i].id === id ? ' active' : '');
   }
 
-  function unlockAudio() {
-    SoundFX.unlock();
-  }
+  function unlockAudio() { SoundFX.unlock(); }
 
   /* --------------------------------------------------------------- kick flow */
 
   function askKick(id, name, mac) {
+    if (!IS_ADMIN) return;
     UI.confirm('Отключить игрока?', (name || id) + (mac ? '  (' + mac + ')' : ''),
       'Отключить', function () {
-        UI.postJson('/api/kick', { id: id }, function (err, data) {
+        API.post('/api/kick', { id: id }, function (err, data) {
           if (err) {
             UI.toast('err', 'Не удалось отключить', err.message, 5000);
             SoundFX.play('error');
@@ -775,13 +875,14 @@
           UI.toast('ok', 'Игрок отключён', (data && data.detail) || name || id, 3500);
           SoundFX.play('leave');
           poll();
-        }, App.settings.adminToken);
+        });
       }, true);
   }
 
   /* -------------------------------------------------------------- name a game */
 
   function openNameGame(id) {
+    if (!IS_ADMIN) return;
     UI.modal({
       title: 'Название игры',
       icon: 'fa-pen',
@@ -801,6 +902,7 @@
   }
 
   function saveGame(close) {
+    if (!IS_ADMIN) return;
     var id = (UI.$('#ng-id').value || '').trim().toUpperCase();
     var name = (UI.$('#ng-name').value || '').trim();
     var link = (UI.$('#ng-link').value || '').trim().toUpperCase();
@@ -808,7 +910,7 @@
       UI.toast('warn', 'Нужно название', 'Введите название игры', 3000);
       return;
     }
-    UI.postJson('/api/games', { id: id, name: name, crosslink: link }, function (err, data) {
+    API.post('/api/games', { id: id, name: name, crosslink: link }, function (err) {
       if (err) {
         UI.toast('err', 'Не сохранено', err.message, 5000);
         SoundFX.play('error');
@@ -819,7 +921,7 @@
       SoundFX.play('game');
       App.gamesSig = '';
       poll();
-    }, App.settings.adminToken);
+    });
   }
 
   /* ------------------------------------------------------------- settings UI */
@@ -860,27 +962,34 @@
     }
     html.push('</div></div>');
 
-    html.push('<div class="section-title">Обновление и логи</div>');
+    html.push('<div class="section-title">Обновление</div>');
     html.push('<div class="field"><label>Интервал опроса</label><select id="st-refresh">');
     var opts = [[1000, 'каждую секунду'], [2000, '2 секунды'], [3000, '3 секунды'], [5000, '5 секунд'], [10000, '10 секунд'], [0, 'выключено']];
     for (var k = 0; k < opts.length; k++) {
       html.push('<option value="' + opts[k][0] + '"' + (Number(s.refresh) === opts[k][0] ? ' selected' : '') + '>' + opts[k][1] + '</option>');
     }
     html.push('</select></div>');
-    html.push('<div class="field"><label>Уровень лога в панели</label><select id="st-loglevel">' +
-      '<option value="all"' + (s.logLevel === 'all' ? ' selected' : '') + '>все</option>' +
-      '<option value="Info"' + (s.logLevel === 'Info' ? ' selected' : '') + '>info и выше</option>' +
-      '<option value="Warn"' + (s.logLevel === 'Warn' ? ' selected' : '') + '>warn и выше</option>' +
-      '<option value="Error"' + (s.logLevel === 'Error' ? ' selected' : '') + '>только ошибки</option>' +
-      '</select></div>');
 
-    html.push('<div class="section-title">Админ</div>');
-    html.push('<div class="field"><label>Admin token</label><input type="password" id="st-token" placeholder="из config.ini (web.adminToken)" value="' + UI.esc(s.adminToken || '') + '">' +
-      '<span class="help">Нужен только если в config.ini задан adminToken. Хранится в этом браузере.</span></div>');
-    html.push('<div class="field"><label>Сообщение всем игрокам</label><div class="row">' +
-      '<input type="text" id="st-say" placeholder="текст для чата в игре…" maxlength="63">' +
-      '<button class="btn ghost" id="st-say-btn"><i class="fas fa-paper-plane"></i></button></div>' +
-      '<span class="help">Уходит через игровой чат PPSSPP всем, кто в группе.</span></div>');
+    if (IS_ADMIN) {
+      html.push('<div class="section-title">Админ</div>');
+      html.push('<div class="field"><label>Лог в панели</label><select id="st-loglevel">' +
+        '<option value="all"' + (s.logLevel === 'all' ? ' selected' : '') + '>все</option>' +
+        '<option value="Info"' + (s.logLevel === 'Info' ? ' selected' : '') + '>info и выше</option>' +
+        '<option value="Warn"' + (s.logLevel === 'Warn' ? ' selected' : '') + '>warn и выше</option>' +
+        '<option value="Error"' + (s.logLevel === 'Error' ? ' selected' : '') + '>только ошибки</option>' +
+        '</select></div>');
+      html.push('<div class="field"><label>Сообщение всем игрокам</label><div class="row">' +
+        '<input type="text" id="st-say" placeholder="текст для чата в игре…" maxlength="63">' +
+        '<button class="btn ghost" id="st-say-btn"><i class="fas fa-paper-plane"></i></button></div>' +
+        '<span class="help">Уходит через игровой чат PPSSPP всем, кто в группе.</span></div>');
+      html.push('<div class="field"><label>Сессия</label><div class="row">' +
+        '<button class="btn ghost" id="st-logout"><i class="fas fa-right-from-bracket"></i> Выйти из админки</button>' +
+        '<span class="help">Токен удалится из этого браузера.</span></div></div>');
+    } else {
+      html.push('<div class="section-title">Публичная доска</div>');
+      html.push('<div class="field"><span class="help">Это только просмотр: MAC/IP, лог протокола, кик и правка базы отключены. ' +
+        'Админская панель работает на отдельном порту в локальной сети.</span></div>');
+    }
 
     UI.modal({
       title: 'Настройки',
@@ -888,7 +997,7 @@
       html: html.join(''),
       actions: [
         { label: 'Сбросить всё', cls: 'ghost', icon: 'fa-rotate-left', onClick: function (close) {
-            UI.confirm('Сбросить настройки?', 'Тема, звук и токен вернутся к значениям по умолчанию.', 'Сбросить', function () {
+            UI.confirm('Сбросить настройки?', 'Тема, звук и интервал вернутся к значениям по умолчанию.', 'Сбросить', function () {
               UI.store('dpt.settings', null);
               App.settings = loadSettings();
               applySettings();
@@ -899,9 +1008,7 @@
           } },
         { label: 'Готово', cls: 'right', icon: 'fa-check', onClick: function (close) { close(); } }
       ],
-      onReady: function (api) {
-        bindSettings(api);
-      }
+      onReady: function (api) { bindSettings(api); }
     });
   }
 
@@ -922,7 +1029,7 @@
     }
 
     var sound = UI.$('#st-sound', root);
-    sound.addEventListener('change', function () {
+    if (sound) sound.addEventListener('change', function () {
       App.settings.sound = sound.checked;
       SoundFX.setEnabled(sound.checked);
       updateSoundButton();
@@ -931,19 +1038,20 @@
 
     var vol = UI.$('#st-volume', root);
     var volVal = UI.$('#st-volume-val', root);
-    vol.addEventListener('input', function () {
-      App.settings.volume = (Number(vol.value) || 0) / 100;
-      SoundFX.setVolume(App.settings.volume);
-      volVal.textContent = vol.value + '%';
-      saveSettings();
-    });
-    vol.addEventListener('change', function () { SoundFX.play('click'); });
+    if (vol) {
+      vol.addEventListener('input', function () {
+        App.settings.volume = (Number(vol.value) || 0) / 100;
+        SoundFX.setVolume(App.settings.volume);
+        if (volVal) volVal.textContent = vol.value + '%';
+        saveSettings();
+      });
+      vol.addEventListener('change', function () { SoundFX.play('click'); });
+    }
 
     var test = UI.$('#st-test', root);
-    test.addEventListener('click', function (e) {
+    if (test) test.addEventListener('click', function (e) {
       var b = closest(e.target, '[data-snd]');
-      if (!b) return;
-      SoundFX.play(b.getAttribute('data-snd'));
+      if (b) SoundFX.play(b.getAttribute('data-snd'));
     });
 
     var evBoxes = UI.$$('[data-ev]', root);
@@ -955,13 +1063,15 @@
       });
     }
 
-    UI.$('#st-refresh', root).addEventListener('change', function () {
+    var refresh = UI.$('#st-refresh', root);
+    if (refresh) refresh.addEventListener('change', function () {
       App.settings.refresh = Number(this.value) || 0;
       saveSettings();
       schedulePoll(true);
     });
 
-    UI.$('#st-loglevel', root).addEventListener('change', function () {
+    var logLevel = UI.$('#st-loglevel', root);
+    if (logLevel) logLevel.addEventListener('change', function () {
       App.settings.logLevel = this.value;
       saveSettings();
       var sel = UI.$('#log-level');
@@ -969,24 +1079,26 @@
       resetLogs();
     });
 
-    UI.$('#st-token', root).addEventListener('change', function () {
-      App.settings.adminToken = this.value.trim();
-      saveSettings();
-    });
-
     var say = UI.$('#st-say', root);
     var sayBtn = UI.$('#st-say-btn', root);
     function sendSay() {
       var text = (say.value || '').trim();
       if (!text) return;
-      UI.postJson('/api/chat', { text: text, sender: 'SERVER' }, function (err, data) {
+      API.post('/api/chat', { text: text, sender: 'SERVER' }, function (err, data) {
         if (err) { UI.toast('err', 'Не отправлено', err.message, 4500); return; }
         UI.toast('ok', 'Сообщение отправлено', (data && data.sent ? data.sent + ' игрок(ов)' : 'нет игроков в группах'), 3000);
         say.value = '';
-      }, App.settings.adminToken);
+      });
     }
-    sayBtn.addEventListener('click', sendSay);
-    say.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendSay(); });
+    if (sayBtn) sayBtn.addEventListener('click', sendSay);
+    if (say) say.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendSay(); });
+
+    var logout = UI.$('#st-logout', root);
+    if (logout) logout.addEventListener('click', function () {
+      API.logout();
+      UI.closeModal();
+      showGate(true, 'вы вышли из админки');
+    });
   }
 
   /* -------------------------------------------------------------- catalog UI */
@@ -995,38 +1107,53 @@
 
   function openCatalog() {
     setActiveTab('tab-catalog');
-    UI.modal({
-      title: 'Каталог игр',
-      icon: 'fa-book-open',
-      html:
-        '<div class="field"><div class="row">' +
-        '<input type="text" id="cat-search" placeholder="Поиск по названию или ID…">' +
-        '<span class="chip id" id="cat-count">…</span></div></div>' +
-        '<div class="catalog-wrap"><table class="catalog-table"><thead><tr><th>ID</th><th>Название</th><th>Crosslink</th><th></th></tr></thead>' +
-        '<tbody id="cat-body"><tr><td colspan="4" class="empty small">загрузка…</td></tr></tbody></table></div>' +
-        '<div class="section-title">Добавить / изменить</div>' +
+    var html = [];
+    html.push('<div class="field"><div class="row">' +
+      '<input type="text" id="cat-search" placeholder="Поиск по названию или ID…">' +
+      '<span class="chip id" id="cat-count">…</span></div></div>' +
+      '<div class="catalog-wrap"><table class="catalog-table"><thead><tr><th>ID</th><th>Название</th><th>Crosslink</th>' +
+      (IS_ADMIN ? '<th></th>' : '') + '</tr></thead>' +
+      '<tbody id="cat-body"><tr><td colspan="4" class="empty small">загрузка…</td></tr></tbody></table></div>');
+
+    if (IS_ADMIN) {
+      html.push('<div class="section-title">Добавить / изменить</div>' +
         '<div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">' +
         '<div class="field" style="flex:1 1 120px;margin:0"><label>Product ID</label><input type="text" id="cat-id" maxlength="9" placeholder="ULUS10084"></div>' +
         '<div class="field" style="flex:2 1 220px;margin:0"><label>Название</label><input type="text" id="cat-name" placeholder="Monster Hunter Freedom"></div>' +
         '<div class="field" style="flex:1 1 110px;margin:0"><label>Crosslink</label><input type="text" id="cat-link" maxlength="9" placeholder="—"></div>' +
         '<button class="btn" id="cat-save"><i class="fas fa-floppy-disk"></i> Сохранить</button>' +
         '</div>' +
-        '<div id="cat-unknown" style="margin-top:10px"></div>',
-      actions: [
-        { label: 'Обновить из файла', cls: 'ghost', icon: 'fa-rotate', onClick: function () {
-            UI.postJson('/api/reload', {}, function (err) {
-              if (err) { UI.toast('err', 'Не удалось', err.message, 4000); return; }
-              UI.toast('ok', 'База перечитана', '', 2500);
-              loadCatalog();
-            }, App.settings.adminToken);
-          } },
-        { label: 'Закрыть', cls: 'right', onClick: function (close) { close(); } }
-      ],
+        '<div id="cat-unknown" style="margin-top:10px"></div>');
+    } else {
+      html.push('<div class="section-title">Справка</div><div class="help" style="font-size:11.5px">' +
+        'Список известных игр и региональных связей (crosslink). Добавлять названия может только администратор.</div>');
+    }
+
+    var actions = [];
+    if (IS_ADMIN) {
+      actions.push({ label: 'Обновить из файла', cls: 'ghost', icon: 'fa-rotate', onClick: function () {
+        API.post('/api/reload', {}, function (err) {
+          if (err) { UI.toast('err', 'Не удалось', err.message, 4000); return; }
+          UI.toast('ok', 'База перечитана', '', 2500);
+          loadCatalog();
+        });
+      } });
+    }
+    actions.push({ label: 'Закрыть', cls: 'right', onClick: function (close) { close(); } });
+
+    UI.modal({
+      title: 'Каталог игр',
+      icon: 'fa-book-open',
+      html: html.join(''),
+      actions: actions,
       onReady: function (api) {
         var search = UI.$('#cat-search', api.body);
-        search.addEventListener('input', function () { renderCatalog(search.value); });
-        UI.$('#cat-save', api.body).addEventListener('click', saveCatalogEntry);
-        UI.$('#cat-body', api.body).addEventListener('click', function (e) {
+        if (search) search.addEventListener('input', function () { renderCatalog(search.value); });
+        var saveBtn = UI.$('#cat-save', api.body);
+        if (saveBtn) saveBtn.addEventListener('click', saveCatalogEntry);
+
+        var body = UI.$('#cat-body', api.body);
+        if (body) body.addEventListener('click', function (e) {
           var b = closest(e.target, '[data-edit]');
           if (!b) return;
           var id = b.getAttribute('data-edit');
@@ -1048,10 +1175,12 @@
   }
 
   function loadCatalog() {
-    UI.getJson('/api/games', function (err, data) {
+    API.get('/api/games', function (err, data) {
       if (err) { UI.toast('err', 'Каталог недоступен', err.message, 4000); return; }
       catalogCache = data;
-      renderCatalog((UI.$('#cat-search') || {}).value || '');
+      var search = UI.$('#cat-search');
+      renderCatalog(search ? search.value : '');
+
       var unknown = data.unknownIds || [];
       var host = UI.$('#cat-unknown');
       if (!host) return;
@@ -1084,7 +1213,8 @@
       shown++;
       html.push('<tr><td class="id">' + UI.esc(g.id) + '</td><td>' + UI.esc(g.name) + '</td>' +
         '<td class="id">' + UI.esc(g.crosslink || '') + '</td>' +
-        '<td class="act"><button class="mini" data-edit="' + UI.esc(g.id) + '" title="Подставить в форму"><i class="fas fa-pen-to-square"></i></button></td></tr>');
+        (IS_ADMIN ? '<td class="act"><button class="mini" data-edit="' + UI.esc(g.id) + '" title="Подставить в форму"><i class="fas fa-pen-to-square"></i></button></td>' : '') +
+        '</tr>');
     }
     if (!shown) html.push('<tr><td colspan="4" class="empty small">ничего не найдено</td></tr>');
     tbody.innerHTML = html.join('');
@@ -1093,19 +1223,20 @@
   }
 
   function saveCatalogEntry() {
+    if (!IS_ADMIN) return;
     var id = (UI.$('#cat-id').value || '').trim().toUpperCase();
     var name = (UI.$('#cat-name').value || '').trim();
     var link = (UI.$('#cat-link').value || '').trim().toUpperCase();
     if (!/^[A-Z0-9]{9}$/.test(id)) { UI.toast('warn', 'Неверный ID', 'Нужен 9-символьный код, например ULUS10084', 3600); return; }
     if (!name) { UI.toast('warn', 'Нужно название', '', 3000); return; }
-    UI.postJson('/api/games', { id: id, name: name, crosslink: link }, function (err) {
+    API.post('/api/games', { id: id, name: name, crosslink: link }, function (err) {
       if (err) { UI.toast('err', 'Не сохранено', err.message, 4500); SoundFX.play('error'); return; }
       UI.toast('ok', 'Сохранено', id + ' → ' + name, 3000);
       SoundFX.play('game');
       App.gamesSig = '';
       loadCatalog();
       poll();
-    }, App.settings.adminToken);
+    });
   }
 
   /* -------------------------------------------------------------------- help */
@@ -1114,7 +1245,6 @@
     setActiveTab('tab-help');
     var host = window.location.hostname || '127.0.0.1';
     var adhocPort = (App.status && App.status.server ? App.status.server.adhocPort : 27312);
-    var webPort = (App.status && App.status.server ? App.status.server.webPort : 8080);
     var html = [];
     html.push('<div class="section-title">Подключение PPSSPP</div>');
     html.push('<ul class="help-list">' +
@@ -1130,10 +1260,26 @@
       '<li>Пинг от PPSSPP идёт каждые ~2 секунды; сессия без пакетов дольше таймаута закрывается.</li>' +
       '<li>После CONNECT сервер рассылает CONNECT_BSSID + CONNECT пирам группы, затем SCAN/SCAN_COMPLETE по запросу.</li>' +
       '</ul>');
-    html.push('<div class="section-title">Служебное</div>');
-    html.push('<div class="field"><span class="help">Если веб-морда недоступна по сети — один раз от администратора:</span>' +
-      '<span class="help-code">netsh http add urlacl url=http://+:' + UI.esc(webPort) + '/ user=Everyone</span></div>');
-    html.push('<div class="field"><span class="help">Горячие клавиши: <span class="kbd">R</span> обновить, <span class="kbd">/</span> поиск, <span class="kbd">Esc</span> закрыть окно.</span></div>');
+
+    if (IS_ADMIN) {
+      html.push('<div class="section-title">Админка</div>');
+      html.push('<ul class="help-list">' +
+        '<li>Токен лежит в <code>config.ini</code> → <code>web.adminToken</code>; введённый токен хранится только в этом браузере.</li>' +
+        '<li>Из токена и соли выводится ключ (PBKDF2-HMAC-SHA256); каждый запрос подписывается (HMAC + timestamp + nonce), тело и ответ шифруются.</li>' +
+        '<li>Повтор запроса блокируется по nonce, «свежесть» — 180 секунд. Проверяйте системное время.</li>' +
+        '<li>Порт админки держите в локальной сети (web.adminPrivateOnly=true отклоняет внешние адреса).</li>' +
+        '</ul>');
+    } else {
+      html.push('<div class="section-title">Публичная доска</div>');
+      html.push('<ul class="help-list">' +
+        '<li>Показывает только игры, группы и ники. MAC, IP, лог протокола и модерация скрыты.</li>' +
+        '<li>Данные обновляются автоматически; интервал можно изменить в настройках.</li>' +
+        '<li>Можно публиковать через reverse proxy (NGinx Proxy Manager): относительные пути и X-Forwarded-* поддерживаются.</li>' +
+        '</ul>');
+    }
+
+    html.push('<div class="section-title">Горячие клавиши</div>');
+    html.push('<div class="field"><span class="help"><span class="kbd">R</span> обновить, <span class="kbd">/</span> поиск, <span class="kbd">Esc</span> закрыть окно.</span></div>');
 
     UI.modal({
       title: 'Справка',
@@ -1146,7 +1292,10 @@
 
   /* -------------------------------------------------------------------- init */
 
-  function init() {
+  function start() {
+    if (App.started) return;
+    App.started = true;
+
     App.settings = loadSettings();
     UI.setTheme(App.settings.theme);
     updateThemeButton();
@@ -1160,16 +1309,42 @@
     var notifyBox = UI.$('#events-follow');
     if (notifyBox) notifyBox.checked = !!App.notify;
 
-    // apply the stored sound settings before the first sound plays
     SoundFX.setEnabled(App.settings.sound);
     SoundFX.setVolume(App.settings.volume);
     SoundFX.setEvents(App.settings.events);
 
     bind();
     poll();
-    App.logTimer = setInterval(logTick, 2600);
-    logTick();
-    UI.toast('info', 'DPT.Agent AdHoc', 'лобби обновляется автоматически', 2600);
+
+    if (IS_ADMIN) {
+      App.logTimer = setInterval(logTick, 2600);
+      logTick();
+    }
+
+    UI.toast('info', 'DPT.PSP AdHoc', IS_ADMIN ? 'админская доска' : 'публичная доска', 2400);
+  }
+
+  function init() {
+    App.settings = loadSettings();
+    UI.setTheme(App.settings.theme);
+    updateThemeButton();
+    updateSoundButton();
+
+    if (!IS_ADMIN) {
+      start();
+      return;
+    }
+
+    bindGate();
+    showGate(true, '');
+    API.init(function (err) {
+      if (err) {
+        showGate(true, err.message || 'нужен admin token');
+        return;
+      }
+      showGate(false);
+      start();
+    });
   }
 
   if (document.readyState === 'loading') {

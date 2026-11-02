@@ -1,43 +1,48 @@
-# DPT.Agent AdHoc Server
+# DPT.PSP AdHoc Server
 
 Сервер ad-hoc сети для PSP-игр (PPSSPP / PRO Online, протокол `SceNetAdhocctl`) на **.NET Framework 4.0**,
-совместимый с Windows XP SP3, **без единой сторонней библиотеки**, с собственной веб-мордой в стиле
-VK/Facebook 2008 (светлая / тёмная / OLED темы), мягкими синтезированными звуками и расширенным
-логированием протокола.
+совместимый с Windows XP SP3, **без единой сторонней библиотеки**.
+
+Две веб-морды на разных портах, одно общее состояние:
 
 ```
-adhoc 27312  <-- PSP / PPSSPP клиенты (TCP, бинарный протокол)
-web   8080   <-- браузер (свой HTTP/1.1 поверх TcpListener, без admin-прав)
+adhoc  27312   <-- PSP / PPSSPP (TCP, бинарный протокол)
+public 44501   <-- публичная доска: read-only, без MAC/IP/логов/модерации (это порт для проброса)
+admin  44502   <-- админка для локалки: кик, чат, баны, каталог, лог протокола
 ```
+
+Публичная и админская доски живут в одном процессе, обновляются из одного `ServerState`,
+публичная просто не содержит чувствительных полей (сервер их не отдаёт, а не прячет в CSS).
 
 ## Что умеет
 
 **Игровой сервер**
-- Полная реализация `SceNetAdhocctl`: `LOGIN`, `CONNECT`, `DISCONNECT`, `SCAN`, `CHAT`, `PING`,
-  ответы `CONNECT_BSSID`, `CONNECT`, `DISCONNECT`, `SCAN`, `SCAN_COMPLETE`, `CHAT`.
-- Группы (комнаты) внутри игры, хост группы (BSSID) = основатель, корректные уведомления пирам.
-- Кросс-региональные игры (`crosslink`): EU/JP/US копии одной игры попадают в одно лобби.
-- Таймауты сессий, лимит на IP, лимит пользователей, автоочистка пустых игр.
-- Дубликаты MAC, «залипшие» сессии, переполнение RX-буфера — всё обрабатывается и логируется.
-- Мягкий режим (по умолчанию): неизвестный опкод не убивает сессию, а пропускается с предупреждением.
+- Полная реализация `SceNetAdhocctl`: `LOGIN`, `CONNECT`, `DISCONNECT`, `SCAN`, `CHAT`, `PING`
+  и ответы `CONNECT_BSSID`, `CONNECT`, `DISCONNECT`, `SCAN`, `SCAN_COMPLETE`, `CHAT`.
+- Группы (комнаты), хост группы (BSSID) = основатель, уведомления пирам, чат внутри группы.
+- Кросс-региональные игры (`crosslink`): EU/JP/US копии попадают в одно лобби.
+- Таймауты сессий, лимиты на IP и на всех, автоочистка пустых игр, дубли MAC.
+- Мягкий режим: неизвестный опкод не убивает сессию, а логируется.
 
-**Веб-морда**
-- Живое лобби: игры → группы → игроки (ник, MAC, IP, время в игре, idle, пинг), раскрывающиеся карточки.
-- Недавние игроки с причиной выхода (вышел / таймаут / кик / обрыв).
-- Лента событий и хвост лога протокола прямо в браузере (с фильтром по уровню и паузой).
-- Каталог игр: поиск по 162 названиям, добавление/правка названия и crosslink прямо из UI.
-- Настройки: тема, звук + громкость + выбор событий, интервал опроса, admin token, чат всем игрокам.
-- Кик игрока одной кнопкой (с подтверждением).
-- Три темы: `light` (VK 2008), `dark`, `oled`; выбор запоминается в браузере.
-- Звуки — WebAudio-синтез (без файлов): вход, выход, новая игра, чат, ошибка, потеря/восстановление связи.
-- Всё на чистом ES5 + CSS (без фреймворков), Font Awesome подключается с CDN (без него вёрстка не ломается).
+**Публичная доска (`44501`)**
+- Игры → группы → ники, кто во что играет, сколько времени в игре, кто хост.
+- Статистика, лента событий, недавние выходы с причиной, каталог игр (только просмотр).
+- Темы light/dark/OLED, мягкие звуки, поиск, автообновление.
+- Никаких MAC, IP, session id, логов и кнопок модерации.
+
+**Админская доска (`44502`)**
+- Всё то же + MAC, IP, idle, трафик, кик, сообщение всем игрокам, баны, правка каталога,
+  живой лог протокола (hex + расшифровка пакетов).
+- Вход по `admin token` из `config.ini`; токен **не уходит по сети** — браузер выводит из него
+  ключ (PBKDF2 + соль) и подписывает каждый запрос, тела и ответы шифруются.
+- По умолчанию принимает только приватные/LAN-адреса (`web.adminPrivateOnly`).
 
 **Надёжность**
-- Supervisor-поток: следит за обоими листенерами, перезапускает их с экспоненциальной задержкой.
-- Fallback-порты, если основной занят (`adhocPortFallbacks`, `web.portFallbacks`).
-- Временные баны IP за повторные ошибки протокола, rate limit HTTP, лимит одновременных запросов.
+- Supervisor перезапускает adhoc и оба веб-листенера с экспоненциальной задержкой.
+- Fallback-порты для всех трёх сервисов.
+- Временные баны IP за ошибки протокола, rate limit HTTP, лимиты тела/заголовков/соединений.
 - Логирование через `Trace` в `logs/adhoc-YYYYMMDD.log` (ротация по дню и размеру, ретеншн),
-  без дублирования в консоль, с защитой от «мёртвых» listener'ов.
+  один listener, без дублирования в консоль, пинги не засоряют файл.
 
 ## Быстрый старт
 
@@ -46,67 +51,98 @@ build.cmd
 run.cmd
 ```
 
-Откройте `http://localhost:8080/` (или `http://<IP-машины>:8080/` из локальной сети).
+- Публичная доска: `http://localhost:44501/` (или `http://<IP>:44501/` для LAN).
+- Админка: `http://localhost:44502/` → токен из `bin/config.ini` (`web.adminToken`).
+  При первом запуске токен и соль генерируются автоматически и печатаются в консоль.
 
-В PPSSPP: **Сеть → Ad Hoc → Включить**, «Пользовательский сервер» → адрес машины с сервером,
-порт **27312**, ник — любой. Игра должна быть запущена, дальше она сама логинится в лобби.
+В PPSSPP: **Сеть → Ad Hoc → Включить**, «Пользовательский сервер» → адрес машины, порт **27312**.
 
-> Требуется .NET Framework 4.0+ (на XP SP3 — именно 4.0). Сборка идёт стоковым `csc.exe`,
-> без NuGet, MSBuild и интернета.
+> .NET Framework 4.0+ (на XP SP3 — именно 4.0). Сборка стоковым `csc.exe`, без NuGet/MSBuild.
+
+## Reverse proxy (NGinx Proxy Manager / nginx / NAT hairpin)
+
+Пробрасывайте наружу **только** публичный порт `44501`; админский `44502` держите в LAN.
+
+- Все клиенты придут с одного адреса (NPM/роутер). Сервер умеет `X-Forwarded-For` и `X-Real-IP`,
+  но доверяет им только от приватных/loopback-пиров (`web.trustedProxies`), а из цепочки берёт
+  первый недоверенный адрес. Rate limit считается по реальному клиенту.
+- Поддомен (`adhoc.example.com`) и под-путь (`example.com/adhoc/`) поддерживаются:
+  ссылки в UI относительные, `X-Forwarded-Prefix` и `web.publicBasePath` срезаются.
+- `GET /api/health` — для health-check.
+- `netsh http add urlacl` не нужен: HTTP-сервер свой (TcpListener), достаточно разрешить
+  `AdHocServer.exe` в фаерволе Windows.
+- TLS терминирует NPM. Подробности и чек-лист — [docs/SECURITY.md](docs/SECURITY.md).
+
+## Безопасность (кратко)
+
+| | Public | Admin |
+|---|---|---|
+| Данные | ники, игры, группы, время | + MAC, IP, id, трафик, логи, баны |
+| Запись | нет | да, только с подписью |
+| Доступ | всем | LAN + `admin token` |
+
+Админский API: `K = PBKDF2-HMAC-SHA256(token, salt, 12000)`, подпись
+`HMAC-SHA256(K, method|target|ts|nonce|sha256(body))`, анти-replay по nonce (±180 c),
+шифрование тел HMAC-CTR + encrypt-then-MAC, сравнение подписей без утечек по времени,
+троттлинг неудачных попыток, CSP/XFO/nosniff на всех ответах.
+Это прикладная защита, **не замена TLS** — публичную доску всё равно публикуйте через HTTPS.
+Полное описание и границы: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Настройки (`config.ini`)
 
 Файл создаётся рядом с `AdHocServer.exe` при первом запуске (пример — `config.example.ini`).
-Ключевые параметры:
 
 | Ключ | По умолчанию | Смысл |
 |---|---|---|
-| `server.adhocPort` | `27312` | порт игрового протокола |
-| `server.adhocPortFallbacks` | `27313,27314` | запасные порты |
+| `server.adhocPort` / `adhocPortFallbacks` | `27312` / `27313,27314` | игровой протокол |
 | `server.maxUsers` / `maxUsersPerIp` | `256` / `16` | лимиты |
-| `server.userTimeoutSec` | `25` | простой до разрыва (PPSSPP пингует каждые ~2 c) |
-| `server.sessionMaxHours` | `12` | жёсткий лимит жизни сессии, `0` = без лимита |
+| `server.userTimeoutSec` | `25` | простой до разрыва (PPSSPP пингует ~2 c) |
+| `server.sessionMaxHours` | `12` | жёсткий лимит жизни сессии, `0` = нет |
 | `server.emptyGameTtlMin` | `15` | сколько пустая игра висит на доске |
 | `server.ignoreUnknownOpcodes` | `true` | мягкий режим протокола |
 | `server.kickDuplicateMac` | `false` | кикать старую сессию при дубле MAC |
-| `web.port` / `web.portFallbacks` | `8080` / `8081…8085` | веб-порт |
-| `web.bindAddress` | `0.0.0.0` | `127.0.0.1` — только локально |
-| `web.adminToken` | пусто | токен для POST-ручек и (опционально) логов |
-| `web.exposeLogs` | `true` | отдавать `/api/logs` |
-| `logging.level` | `Info` | `Error/Warn/Info/Debug/Verbose` |
-| `logging.protocolTrace` | `true` | подробный лог пакетов |
+| `web.publicPort` / `publicPortFallbacks` | `44501` / `44503,44505` | публичная доска |
+| `web.adminPort` / `adminPortFallbacks` | `44502` / `44504,44506` | админка |
+| `web.publicBind` / `adminBind` | `0.0.0.0` | `127.0.0.1` — только локально |
+| `web.adminPrivateOnly` | `true` | админка только для приватных адресов |
+| `web.publicBasePath` / `adminBasePath` | пусто | под-путь за reverse proxy |
+| `web.trustProxyHeaders` / `trustedProxies` | `true` / приватные | доверие `X-Forwarded-*` |
+| `web.adminToken` / `adminSalt` | генерируются | доступ в админку (KDF-соль) |
+| `web.adminKdfIterations` | `12000` | PBKDF2-итерации |
+| `web.adminEncrypt` | `true` | шифровать тела админского API |
+| `web.exposeLogs` | `true` | отдавать лог (только админский порт) |
+| `logging.level` / `protocolTrace` | `Info` / `true` | подробность лога |
 | `limits.*` | — | баны, размеры истории/событий/буфера |
 
-После правки `config.ini` нужен перезапуск сервера.
+После правки `config.ini` нужен перезапуск.
 
 ## Веб-интерфейс
 
-- **Лобби** — карточки игр. Клик раскрывает группы: хост с короной, игроки, MAC, IP, время, idle, кик.
-- **Поиск** — по названию, product ID, нику, MAC или IP. `/` — фокус, `R` — обновить сейчас.
-- **События** — вход/выход/группы/чат/ошибки; галочка «оповещать» выключает звуки и тосты.
-- **Протокол** — живой хвост лога (`/api/logs`), уровень и пауза; видно сырые пакеты и их расшифровку.
-- **Каталог игр** — таблица Product ID ↔ название, crosslink, кнопка «Обновить из файла».
-- **Настройки** — тема, звук (громкость, тест, какие события озвучивать), период опроса,
-  уровень лога, admin token, отправка сообщения всем игрокам через игровой чат.
-- **Справка** — что вводить в PPSSPP, как устроен протокол, горячие клавиши.
+- **Лобби** — карточки игр, клик раскрывает группы: хост с короной, игроки, время, idle.
+- **Поиск** — по названию, product ID, нику, MAC или IP (MAC/IP только в админке).
+- **События** — вход/выход/группы/чат/ошибки; «оповещать» выключает звуки и тосты.
+- **Протокол** (админ) — живой хвост лога, уровень, пауза, hex + расшифровка пакетов.
+- **Каталог игр** — таблица ID ↔ название и crosslink'и; правка только в админке.
+- **Настройки** — тема, звук/громкость/события, период опроса; в админке ещё чат и выход.
+- **Справка** — настройка PPSSPP, протокол, горячие клавиши (`R`, `/`, `Esc`).
 
 ## API
 
-`/api/status`, `/api/games` (GET/POST), `/api/logs`, `/api/history`, `/api/bans`, `/api/bans/clear`,
-`/api/kick`, `/api/chat`, `/api/reload`, `/api/health`, плюс легаси `/status.xml`
-(XML в формате PRO Online для старых мониторингов). Подробности и примеры — [docs/API.md](docs/API.md).
+Публично: `/api/status`, `/api/games`, `/api/history`, `/api/health`, `/status.xml`.
+Админ: то же без вычистки + `/api/auth`, `/api/logs`, `/api/bans`, `/api/bans/clear`,
+`/api/kick`, `/api/chat`, `/api/reload` (с подписью и шифрованием).
+Схема подписи, примеры и коды ответов — [docs/API.md](docs/API.md).
 
 ## Логи
 
 ```
-logs/adhoc-20261102.log          # текущий файл
+logs/adhoc-20261102.log          # текущий
 logs/adhoc-20261102.001.log      # после 8 MB
 ```
 
-Пишется через `Trace` одним собственным listener'ом: `timestamp [level] category message`.
-Категории: `APP`, `NET`, `PROTO`, `WEB`, `DB`, `CONFIG`, `LOG`, `UI`.
-`PROTO` содержит hex + расшифровку каждого пакета (`LOGIN nic=… game=…`, `CONNECT_BSSID …`),
-причину закрытия сессии, длительность и объём трафика. Пинги не засоряют лог (только `Verbose`).
+Формат: `timestamp [level] category message`. Категории `APP`, `NET`, `PROTO`, `WEB`, `DB`,
+`CONFIG`, `LOG`, `UI`. В `PROTO` — hex и расшифровка пакетов, причина закрытия сессии,
+длительность и трафик. Пинги — только на уровне `Verbose`.
 
 ## Устройство проекта
 
@@ -114,79 +150,71 @@ logs/adhoc-20261102.001.log      # после 8 MB
 build.cmd / run.cmd                сборка стоковым csc.exe / запуск
 src/AdHocServer/
   Program.cs                       bootstrap, аргументы, graceful shutdown
-  AppSupervisor.cs                  watchdog листенеров
+  AppSupervisor.cs                 watchdog (adhoc + public + admin)
   ConsoleUi.cs                     консоль: статус + команды
-  Core/Config.cs                   парсер config.ini (+ port.txt)
+  Core/Config.cs                   config.ini, генерация токена/соли, нормализация
+  Core/ApiCrypto.cs                PBKDF2 / HMAC / HMAC-CTR конверт / nonce-кэш
   Core/Log.cs                      Trace-listener, ротация, ring-буфер для UI
-  Core/Json.cs                     свой JSON (парсер + writer), без зависимостей
+  Core/Json.cs                     свой JSON (парсер + writer)
   Core/GameDatabase.cs             product ID ↔ игра, crosslinks, data/games.json
   Core/ServerState.cs              игры/группы/сессии/история/события
-  Core/ServerApp.cs                общий контекст
   Core/Util.cs                     MAC/IP/hex/время/строки
   Net/Protocol.cs                  опкоды и сборка пакетов S2C
   Net/ClientSession.cs             TCP-сессия, буфер, send-lock
-  Net/AdhocServer.cs               состояние протокола, группы, чат, баны, таймауты
+  Net/AdhocServer.cs               протокол, группы, чат, баны, таймауты
   Web/HttpCore.cs                  HTTP/1.1: запрос, ответ, keep-alive, chunked
-  Web/WebServer.cs                 листенер, статика, gzip, ETag/304, rate limit
-  Web/WebApi.cs                    JSON/XML API
-public/                            веб-морда (html/css/js, без сборки)
-data/games.json                     база названий (создаётся/правится автоматически)
-tools/test-client.ps1              тест протокола (LOGIN/CONNECT/SCAN/CHAT)
-tools/test-web.ps1                 тест API, статики и кика
+  Web/WebServer.cs                 листенер, роль, прокси, статика, gzip, auth
+  Web/WebApi.cs                    публичный (redacted) и админский API
+public/index.html                  публичная доска (data-role="public")
+public/admin.html                  админка (data-role="admin") + экран входа
+public/assets/js/{ui,sound,app}.js общий UI
+public/assets/js/crypto.js         SHA-256/HMAC/PBKDF2/CTR на ES5
+public/assets/js/auth.js           клиент админского API (подпись + шифрование)
+data/games.json                    база названий (создаётся/правится автоматически)
+tools/test-client.ps1              тест протокола
+tools/test-web.ps1                 тест обеих досок (вычистка, подпись, replay, шифрование)
+tools/admin-api.ps1                клиент админского API для PowerShell
 tools/hold-client.ps1              «держатель» сессии для ручных проверок
 docs/PROTOCOL.md                   байтовый формат пакетов
 docs/ARCHITECTURE.md               потоки, блокировки, отказоустойчивость
 docs/API.md                        HTTP API
+docs/SECURITY.md                   модель угроз, подпись/шифрование, reverse proxy
 ```
-
-Подробности: [docs/PROTOCOL.md](docs/PROTOCOL.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Сборка и проверка
 
 ```bat
-build.cmd                     :: csc.exe /langversion:4 /define:TRACE -> bin\AdHocServer.exe
-powershell -File tools\test-client.ps1     :: протокол
-powershell -File tools\test-web.ps1 -Base http://127.0.0.1:8080
+build.cmd
+powershell -File tools\test-client.ps1
+powershell -File tools\test-web.ps1
 ```
 
-`build.cmd` копирует `public/` и `config.example.ini` в `bin/`, данные и логи создаются при запуске.
-Проект также открывается в Visual Studio 2010+ (`src/AdHocServer/AdHocServer.csproj`, TargetFramework 4.0).
+`build.cmd` собирает `bin\AdHocServer.exe`, копирует `public/` и `config.example.ini`.
+Тест API сам поднимает «держателей» сессий и восстанавливает `data/games.json` после себя.
+Проект открывается в Visual Studio 2010+ (`src/AdHocServer/AdHocServer.csproj`).
 
-> Правя фронтенд, не забудьте `build.cmd` (или скопировать `public/` в `bin/public/`) и поднять `?v=`
-> в `public/index.html`, иначе браузер отдаст закешированный CSS/JS.
-
-## Отказоустойчивость в деталях
-
-1. **Supervisor** каждые 2 c проверяет `IsRunning` обоих листенеров, при падении перезапускает
-   (backoff 1→2→4…30 c), событие `Failed` из accept-loop ускоряет реакцию.
-2. **Fallback-порты**: занятый порт — не ошибка, а повод взять следующий; всё пишется в лог и на доску.
-3. **Мягкий протокол**: неизвестные опкоды, скан из группы, повторный `CONNECT` — не рвут сессию
-   (строгий режим включается `ignoreUnknownOpcodes=false`).
-4. **Таймауты**: idle-сессия, жёсткий лимит жизни, переполнение буфера, зависшая запись — всё
-   закрывается с причиной, пиры получают `DISCONNECT`.
-5. **Баны**: N ошибок протокола с одного IP → временный бан (`maxFailedLoginsPerIp`, `banSeconds`).
-6. **HTTP**: rate limit на IP, лимит параллельных запросов, таймауты сокета, обрезка тела запроса,
-   запрет path traversal, `Connection: close` при перегрузке.
-7. **Процесс**: глобальные обработчики `UnhandledException` / `ProcessExit`, финальный `Trace.Flush`,
-   остановка при Ctrl+C и `quit` без «зависших» потоков (все `IsBackground`).
+> Правя фронтенд, запустите `build.cmd` (или скопируйте `public/` в `bin/public/`) и поднимите
+> `?v=` у CSS/JS в HTML, иначе браузер отдаст кеш.
 
 ## Совместимость
 
 - Windows XP SP3 + .NET Framework 4.0 — целевая среда (только API .NET 4.0, C# 4).
-- Windows 7/10/11 — работает и на .NET 4.8 (тот же CLR 4.0, сборка не меняется).
-- Linux/macOS через Mono >= 4.x — теоретически да (используется только BCL), не тестировалось.
-- Браузер: любой современный; вёрстка на CSS-переменных, ES5-скрипты.
+- Windows 7/10/11 — работает и на .NET 4.8 (тот же CLR 4.0).
+- Linux/macOS через Mono ≥ 4.x — теоретически да, не тестировалось.
+- Браузер: любой современный; вёрстка на CSS-переменных, ES5-скрипты, CSP без inline-скриптов.
 
 ## Решение проблем
 
 | Симптом | Что делать |
 |---|---|
-| В логе `port … is busy`, веб на другом порту | порт занят другой программой; смотрите лог/консоль — сервер уже взял fallback-порт |
-| `http://IP:8080` не открывается | фаервол Windows: разрешить `AdHocServer.exe` (частные сети); либо `web.bindAddress=127.0.0.1` и заходить локально |
-| PPSSPP не видит лобби | проверить порт 27312, IP сервера, и что игра запущена; в логе будет `LOGIN` |
-| Игроки одной игры не видят друг друга | разные региональные ID — добавьте crosslink в каталоге |
-| Нет иконок | нет интернета/CDN; положите Font Awesome локально в `public/assets/vendor/` и поправьте `<link>` |
-| Нет звука | браузер блокирует autoplay до первого клика — кликните по странице; громкость в настройках |
+| `port … is busy` в логе | порт занят, сервер уже взял fallback-порт — смотрите лог/консоль |
+| Публичная доска не открывается по IP | фаервол Windows: разрешить `AdHocServer.exe` (частные сети) |
+| «нужен admin token» / 401 | токен из `config.ini` → `web.adminToken`; проверьте часы (окно ±180 с) |
+| 403 на админке | вы не в приватной сети (`web.adminPrivateOnly`) |
+| PPSSPP не видит лобби | порт 27312, IP сервера, игра запущена; в логе будет `LOGIN` |
+| Игроки одной игры не видят друг друга | разные региональные ID → добавьте crosslink в каталоге |
+| Нет иконок | нет CDN; положите Font Awesome локально в `public/assets/vendor/` |
+| Нет звука | autoplay блокируется до первого клика по странице |
 
 ## Атрибуция
 

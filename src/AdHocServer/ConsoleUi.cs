@@ -28,7 +28,7 @@ namespace Dpt.AdHoc
 
         public void Start()
         {
-            try { Console.Title = "DPT.Agent AdHoc Server - adhoc " + _app.Adhoc.Port + " / web " + _app.Web.Port; } catch { }
+            try { Console.Title = "DPT.PSP AdHoc - adhoc " + _app.Adhoc.Port + " / public " + _app.WebPublic.Port + " / admin " + _app.WebAdmin.Port; } catch { }
             _thread = new Thread(Loop);
             _thread.IsBackground = true;
             _thread.Name = "console-ui";
@@ -105,7 +105,7 @@ namespace Dpt.AdHoc
 
             string line = " online " + online + "/" + _app.Cfg.MaxUsers +
                           " | games " + games + " | groups " + groups +
-                          " | http " + _app.Web.Port + " | up " + Util.HumanDuration(_app.Uptime) +
+                          " | web " + _app.WebPublic.Port + "/" + _app.WebAdmin.Port + " | up " + Util.HumanDuration(_app.Uptime) +
                           " | mem " + (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + "MB ";
             if (line.Length > width - 1) line = line.Substring(0, width - 1);
 
@@ -248,10 +248,13 @@ namespace Dpt.AdHoc
             Console.WriteLine("  " + _app.Name + " v" + _app.Version + "  (build " + _app.BuildStamp + ")");
             Console.WriteLine("  uptime         : " + Util.HumanDuration(_app.Uptime));
             Console.WriteLine("  adhoc port     : " + _app.Adhoc.Port + (File.Exists(_app.Cfg.ConfigPath) ? "  (config: " + _app.Cfg.ConfigPath + ")" : ""));
-            Console.WriteLine("  web            : " + (_app.Web.IsRunning ? _app.Web.BaseUrl : "not running"));
-            Console.WriteLine("  web root       : " + _app.Web.Root);
+            Console.WriteLine("  public board   : " + (_app.WebPublic.IsRunning ? _app.WebPublic.BaseUrl : "not running"));
+            Console.WriteLine("  admin board    : " + (_app.WebAdmin.IsRunning ? _app.WebAdmin.BaseUrl : "not running"));
+            Console.WriteLine("  web root       : " + _app.WebPublic.Root);
             Console.WriteLine("  protocol       : " + _app.Adhoc.StatusLine());
-            Console.WriteLine("  web            : " + _app.Web.StatusLine());
+            Console.WriteLine("  public         : " + _app.WebPublic.StatusLine());
+            Console.WriteLine("  admin          : " + _app.WebAdmin.StatusLine());
+            Console.WriteLine("  admin token    : " + (string.IsNullOrEmpty(_app.Cfg.AdminToken) ? "MISSING (see config.ini)" : "set (config.ini: web.adminToken)"));
             Console.WriteLine("  game db        : " + _app.Db.Count + " titles / " + _app.Db.CrosslinkCount + " crosslinks");
             Console.WriteLine("  memory         : " + (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + " MB");
             Console.WriteLine();

@@ -307,7 +307,7 @@ namespace Dpt.AdHoc.Web
             StringBuilder sb = new StringBuilder(512);
             sb.Append("HTTP/1.1 ").Append(response.Status).Append(' ').Append(HttpResponse.Reason(response.Status)).Append("\r\n");
             sb.Append("Date: ").Append(DateTime.UtcNow.ToString("R", CultureInfo.InvariantCulture)).Append("\r\n");
-            sb.Append("Server: DPT.Agent-AdHoc\r\n");
+            sb.Append("Server: DPT.PSP-AdHoc\r\n");
             if (!string.IsNullOrEmpty(response.ContentType))
                 sb.Append("Content-Type: ").Append(response.ContentType).Append("\r\n");
 

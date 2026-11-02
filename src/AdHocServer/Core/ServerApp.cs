@@ -7,7 +7,7 @@ namespace Dpt.AdHoc.Core
     /// <summary>Composition root shared by the protocol server, web server and supervisor.</summary>
     public sealed class ServerApp
     {
-        public readonly string Name = "DPT.Agent AdHoc Server";
+        public readonly string Name = "DPT.PSP AdHoc Server";
         public readonly string Version;
         public readonly string BuildStamp;
 
@@ -15,7 +15,8 @@ namespace Dpt.AdHoc.Core
         public GameDatabase Db;
         public ServerState State;
         public Dpt.AdHoc.Net.AdhocServer Adhoc;
-        public Dpt.AdHoc.Web.WebServer Web;
+        public Dpt.AdHoc.Web.WebServer WebPublic;
+        public Dpt.AdHoc.Web.WebServer WebAdmin;
 
         public DateTime StartedUtc = DateTime.UtcNow;
         public volatile bool ShuttingDown;

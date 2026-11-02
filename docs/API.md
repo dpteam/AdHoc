@@ -1,171 +1,145 @@
 # HTTP API
 
-Базовый URL: `http://<host>:8080` (порт может быть другим — см. лог/консоль).
-Все ответы — `application/json; charset=utf-8` (кроме `/status.xml`).
-Gzip включается автоматически при `Accept-Encoding: gzip` и размере ≥ 1 KB.
+Две доски — два порта, один процесс и одно состояние:
 
-Мутирующие ручки (`POST`) требуют заголовок `X-Admin-Token`, **если** в `config.ini`
-задан `web.adminToken`. Иначе доступны без токена (удобно в локальной сети).
+| | Public | Admin |
+|---|---|---|
+| По умолчанию | `http://<host>:44501` | `http://<host>:44502` |
+| Роль | read-only, данные вычищены | полный доступ, подпись + шифрование |
+| `data-role` в HTML | `public` | `admin` |
 
-## GET `/api/status`
+Публичная доска **не содержит** полей `mac`, `ip`, `idleSec`, `bytesIn/Out`, `pings`, `id`,
+`rawId` и событий `error/ban/kick/chat`. Админские эндпоинты на публичном порту отвечают `404`.
 
-Главный снапшот доски. Обновляется фронтендом каждые N секунд.
+## Публичный API
+
+| Метод | Путь | Что отдаёт |
+|---|---|---|
+| GET | `/api/status` | игры → группы → ники, статистика, последние выходы, события |
+| GET | `/api/games` | каталог: 162 названия, crosslink'и, `unknownIds` |
+| GET | `/api/history?limit=50` | завершённые сессии (без MAC/IP) |
+| GET | `/api/health` | `{"ok":true,"role":"public","uptimeSec":…}` |
+| GET | `/status.xml` | легаси PRO Online XML |
+| GET | `/` | публичная доска (`index.html`) |
+
+Пример ответа `/api/status` (сокращён):
 
 ```json
 {
-  "ok": true,
-  "nowUtc": "2026-11-02T19:34:18.193Z",
+  "ok": true, "role": "public", "nowUtc": "2026-11-02T20:02:28.120Z",
   "server": {
-    "name": "DPT.Agent AdHoc Server", "version": "1.0.0", "build": "2026-11-02 22:32",
-    "startedUtc": "2026-11-02T19:32:56.120Z", "uptimeSec": 82,
-    "adhocPort": 27312, "webPort": 8080, "webUrl": "http://localhost:8080/",
-    "host": "DPTSRV0", "os": "Microsoft Windows NT 6.2.9200.0", "clr": "4.0.30319.42000",
-    "cpus": 8, "memoryMB": 26.7, "protocol": "PRO Online / PPSSPP adhocctl", "logLevel": "Info"
+    "name": "DPT.PSP AdHoc Server", "version": "1.0.0", "build": "2026-11-02 22:32",
+    "startedUtc": "…", "uptimeSec": 82, "adhocPort": 27312, "webPort": 44501,
+    "role": "public", "protocol": "PRO Online / PPSSPP adhocctl"
   },
   "games": [{
-    "id": "ULUS10084", "rawId": "ULES00318", "name": "Monster Hunter Freedom", "known": true,
-    "players": 2, "peak": 3, "totalPlayers": 9,
-    "createdUtc": "…", "lastActivityUtc": "…",
+    "id": "ULUS10084", "name": "Monster Hunter Freedom", "known": true,
+    "players": 2, "peak": 3, "totalPlayers": 9, "lastActivityUtc": "…",
     "groups": [{
-      "name": "ABCD1234", "players": 2, "host": "02:00:00:15:00:01", "createdUtc": "…",
-      "members": [{
-        "id": "fb19d74e43", "name": "DbgOne", "mac": "02:00:00:15:00:01", "ip": "127.0.0.1",
-        "connectUtc": "…", "connectedSec": 61, "idleSec": 1,
-        "bytesIn": 153, "bytesOut": 146, "pings": 30, "isHost": true
-      }]
+      "name": "ROOM1234", "players": 2,
+      "members": [
+        { "name": "Kai", "connectUtc": "…", "connectedSec": 61, "isHost": true },
+        { "name": "Ryo", "connectUtc": "…", "connectedSec": 12, "isHost": false }
+      ]
     }],
     "idle": []
   }],
-  "stats": {
-    "online": 2, "peak": 3, "games": 2, "groups": 1,
-    "connections": 11, "logins": 11, "chats": 2, "timeouts": 0,
-    "protocolErrors": 0, "kicks": 0, "bans": 0, "duplicateMacs": 0,
-    "history": 9, "events": 36, "bytesIn": 306, "bytesOut": 292,
-    "webRequests": 18, "eventSeq": 36
-  },
-  "recent": [{
-    "name": "HolderThree", "gameId": "ULUS10391", "gameName": "Monster Hunter Freedom Unite",
-    "mac": "02:00:00:0D:00:01", "ip": "127.0.0.1", "group": "ABCD1234",
-    "connectUtc": "…", "disconnectUtc": "…", "durationSec": 25.4, "reason": "timeout"
-  }],
-  "events": [{
-    "seq": 36, "timeUtc": "…", "type": "join", "gameId": "ULUS10084",
-    "gameName": "Monster Hunter Freedom", "player": "Kai", "text": "Kai started playing Monster Hunter Freedom"
-  }],
-  "unknownIds": ["ULJS00999"],
-  "config": {
-    "theme": "light", "sound": true, "refreshMs": 2000, "timeoutSec": 25, "maxUsers": 256,
-    "exposeLogs": true, "adminRequired": false,
-    "historySize": 300, "eventSize": 400, "dbGames": 162, "dbCrosslinks": 115
-  }
+  "stats": { "online": 2, "peak": 3, "games": 2, "groups": 1, "connections": 11,
+             "chats": 2, "timeouts": 0, "events": 36, "eventSeq": 36 },
+  "recent": [{ "name": "HolderThree", "gameId": "ULUS10391",
+               "gameName": "Monster Hunter Freedom Unite", "group": "ABCD1234",
+               "connectUtc": "…", "disconnectUtc": "…", "durationSec": 25.4,
+               "reason": "timeout" }],
+  "events": [{ "seq": 36, "timeUtc": "…", "type": "join",
+               "gameName": "Monster Hunter Freedom", "player": "Kai",
+               "text": "Kai started playing Monster Hunter Freedom" }],
+  "unknownIds": [],
+  "config": { "theme": "light", "sound": true, "refreshMs": 2000, "timeoutSec": 25,
+              "maxUsers": 256, "dbGames": 162, "dbCrosslinks": 115,
+              "role": "public", "auth": false }
 }
 ```
 
-`type` событий: `join`, `leave`, `group.join`, `group.leave`, `game.new`, `chat`, `error`, `ban`, `kick`.
-`reason` завершения сессии: `peer-closed`, `client-request`, `timeout`, `kicked`, `shutdown`,
-`session-lifetime`, `protocol-error`, `send-failed`, `io-error`, `duplicate-mac`, `rx-overflow`.
+Типы событий в публичной ленте: `join`, `leave`, `game.new`, `group.join`, `group.leave`.
 
-## GET `/api/games`
+## Админский API
 
-```json
-{
-  "ok": true, "count": 162, "crosslinks": 115,
-  "games": [{ "id": "ULUS10084", "name": "Monster Hunter Freedom" },
-            { "id": "ULES00318", "name": "Monster Hunter Freedom", "crosslink": "ULUS10084" }],
-  "unknownIds": []
-}
+### Шаг 0. Параметры входа
+
+```http
+GET /api/auth
+→ {"ok":true,"scheme":"hmac-sha256+ctr","salt":"1a3e…","iterations":12000,
+   "encrypt":true,"role":"admin","skewSec":180,"ts":1793650228}
 ```
 
-## POST `/api/games`
+### Подпись каждого запроса
 
-Добавить/переименовать игру или связать регионы.
+```
+K     = PBKDF2-HMAC-SHA256(adminToken, salt, iterations, 32)
+kmac  = HMAC-SHA256(K, "dpt.mac.v1")
+canonical = METHOD \n path?query \n unixTs \n nonce \n hex(SHA256(wireBody))
+X-Auth-Sig = hex(HMAC-SHA256(kmac, canonical))
+```
+
+Заголовки: `X-Auth-Ts`, `X-Auth-Nonce` (hex ≥16 символов), `X-Auth-Sig`.
+Окно по времени ±180 с, каждый nonce одноразовый (кэш 10 минут).
+
+`path?query` — **относительный** путь приложения (`/api/status?limit=20`), поэтому схема
+работает и когда reverse proxy срезает префикс, и когда пробрасывает его целиком.
+
+### Шифрование тела
+
+Если `adminEncrypt=true`, тело запроса и **любой** JSON-ответ шифруются:
+
+```
+envelope = base64( iv16 | HMAC-CTR(HMAC(K,"dpt.enc.v1"), iv) XOR data | HMAC(kmac, iv|data)[0..16] )
+```
+
+Запрос: заголовок `X-Auth-Enc: 1`, тело — конверт (base64-строка).
+Ответ: заголовок `X-Enc-Resp: 1`, тело — конверт.
+
+### Эндпоинты
+
+| Метод | Путь | Что делает |
+|---|---|---|
+| GET | `/api/status` | полный снапшот (+ MAC, IP, id, idle, байты) |
+| GET | `/api/games` | каталог (+ crosslink) |
+| POST | `/api/games` | `{"id":"ULUS10084","name":"…","crosslink":""}` |
+| GET | `/api/history?limit=100` | история (+ MAC/IP/трафик) |
+| GET | `/api/logs?since=0&limit=200&level=all&cat=PROTO` | хвост лога |
+| GET | `/api/bans` | активные баны |
+| POST | `/api/bans/clear` | сброс банов |
+| POST | `/api/kick` | `{"id":"…"}` / `{"mac":"…"}` / `{"name":"…"}` |
+| POST | `/api/chat` | `{"text":"…","sender":"SERVER"}` |
+| POST | `/api/reload` | перечитать `data/games.json` |
+| GET | `/api/health` | без подписи |
+| GET | `/api/auth` | без подписи (только соль/итерации) |
+| GET | `/` | админская доска (`admin.html`) |
+
+`GET /api/health` и `GET /api/auth` подписи не требуют — иначе не с чего начать.
+Всё остальное без валидной подписи → `401`.
+
+## Примеры
+
+Быстрее всего — готовый клиент `tools/admin-api.ps1` (он использует ту же реализацию
+`ApiCrypto`, что и сервер, поэтому не может «разъехаться»):
+
+```powershell
+. .\tools\admin-api.ps1
+Connect-DptAdmin -Base http://127.0.0.1:44502 -Token (Select-String -Path .\bin\config.ini -Pattern '^adminToken=').Line.Split('=')[1]
+
+Invoke-DptAdmin -Method GET  -Target '/api/status'
+Invoke-DptAdmin -Method GET  -Target '/api/logs?limit=50&level=Warn'
+Invoke-DptAdmin -Method POST -Target '/api/kick' -Payload @{ name = 'Kai' } -Encrypt
+Invoke-DptAdmin -Method POST -Target '/api/chat' -Payload @{ text = 'server restart in 5 min' } -Encrypt
+```
+
+Публичная часть — обычный curl:
 
 ```bash
-curl -X POST http://localhost:8080/api/games \
-  -H "Content-Type: application/json" \
-  -d '{"id":"ULUS10084","name":"Monster Hunter Freedom","crosslink":""}'
-```
-
-Ответ: `{"ok":true,"id":"ULUS10084","name":"…","crosslink":"","count":163}`.
-`id` — ровно 9 символов `[A-Z0-9]`. Пустой `crosslink` ничего не меняет; чтобы убрать связь,
-передайте `crosslink` основного ID (или правьте `data/games.json` вручную).
-
-## GET `/api/history?limit=100`
-
-Последние завершённые сессии (новые первыми), поля как в `recent`, плюс `bytesIn`/`bytesOut`.
-
-## GET `/api/logs?since=0&limit=200&level=all&cat=PROTO`
-
-Хвост лога из памяти (ring buffer, без чтения файла).
-
-```json
-{
-  "ok": true, "seq": 128,
-  "lines": [{ "seq": 127, "t": "22:36:18.756", "utc": "…", "lvl": "D", "cat": "PROTO",
-              "msg": "LOGIN Kai mac=…" }]
-}
-```
-
-`level`: `all|Error|Warn|Info|Debug|Verbose`. `since` — вернуть только записи с `seq > since`.
-Инкрементальный опрос: фронтенд присылает последний известный `seq`.
-Отключается `web.exposeLogs=false` (тогда 403). Если задан `web.adminToken`, лог тоже
-требует `X-Admin-Token` (в UI токен вводится в настройках).
-
-## GET `/api/bans`
-
-`{"ok":true,"count":1,"bans":[{"ip":"1.2.3.4","secondsLeft":"87"}]}`
-
-## POST `/api/bans/clear`
-
-Очистить список временных банов: `{"ok":true,"cleared":3}`.
-
-## POST `/api/kick`
-
-```json
-{ "id": "fb19d74e43" }
-```
-
-Селектор — одно из полей: `id` (session id), `mac`, `name` (ник), либо `?q=` в query.
-
-```json
-{ "ok": true, "kicked": 1, "detail": "Kai / 02:00:00:15:00:01 / 127.0.0.1" }
-```
-
-Нет совпадений → `404` и `"ok":false`.
-
-## POST `/api/chat`
-
-Отправить сообщение в игровой чат (PPSSPP покажет его в группе).
-
-```json
-{ "text": "Сервер перезапустится через 5 минут", "sender": "SERVER" }
-```
-
-Ответ: `{"ok":true,"sent":3,"text":"…"}`. Текст обрезается до 63 байт (лимит протокола).
-
-## POST `/api/reload`
-
-Перечитать `data/games.json` с диска (после ручной правки).
-Ответ: `{"ok":true,"games":162}`.
-
-## GET `/api/health`
-
-`{"ok":true,"name":"…","version":"1.0.0","uptimeSec":82}` — для мониторинга, без токена.
-
-## GET `/status.xml`
-
-Легаси-формат PRO Online:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<prometheus usercount="2">
-	<game name="Monster Hunter Freedom" usercount="2">
-		<group name="ABCD1234" usercount="2">
-			<user>Kai</user>
-			<user>Ryo</user>
-		</group>
-	</game>
-</prometheus>
+curl http://localhost:44501/api/status | python -m json.tool
+curl http://localhost:44501/api/games?limit=10
+curl http://localhost:44501/status.xml
 ```
 
 ## Коды ответов
@@ -173,29 +147,22 @@ curl -X POST http://localhost:8080/api/games \
 | Код | Когда |
 |---|---|
 | 200 | успех |
-| 304 | статика: `If-None-Match` / `If-Modified-Since` совпали |
-| 400 | битый JSON или параметры |
-| 401 | нужен/неверный `X-Admin-Token` |
-| 403 | логи отключены |
-| 404 | неизвестный endpoint/файл, кик никого не нашёл |
+| 304 | статика: `If-None-Match` / `If-Modified-Since` |
+| 400 | битый JSON/параметры, path traversal |
+| 401 | нет/неверная подпись, просроченный `ts`, повторный nonce |
+| 403 | админский порт и не-приватный адрес клиента, логи отключены |
+| 404 | неизвестный эндпоинт, скрытый на публичном порту, кик никого не нашёл |
 | 405 | неверный метод |
-| 413 | тело запроса больше лимита |
-| 429 | превышен `web.requestsPerMinute` |
-| 500 | внутренняя ошибка (пишется в лог) |
-| 503 | превышен `web.maxConcurrentRequests` |
+| 413 | тело больше лимита |
+| 429 | rate limit или блок после серии неудачных подписей |
+| 500 | внутренняя ошибка (детали только в логе) |
+| 503 | превышен лимит одновременных соединений |
 
-## Примеры
+## Совместимость с reverse proxy
 
-```bash
-curl http://localhost:8080/api/status | python -m json.tool
-curl -X POST http://localhost:8080/api/kick -d '{"name":"Kai"}'
-curl -X POST http://localhost:8080/api/chat -d '{"text":"hello"}'
-curl "http://localhost:8080/api/logs?since=0&limit=50&level=Warn"
-```
-
-С токеном:
-
-```bash
-curl -X POST http://localhost:8080/api/kick \
-  -H "X-Admin-Token: hunter2" -d '{"mac":"02:00:00:15:00:01"}'
-```
+- `X-Forwarded-For` / `X-Real-IP` учитываются только от доверенных пиров
+  (`web.trustedProxies`, по умолчанию loopback + приватные подсети).
+- `X-Forwarded-Prefix` и `web.publicBasePath` срезаются из пути до маршрутизации.
+- Ссылки и API-вызовы в UI относительные → работают и на поддомене, и на `/adhoc/`.
+- `Connection: keep-alive` поддерживается, но не обязателен: NPM может закрывать соединения.
+- `GET /api/health` годится для health-check.

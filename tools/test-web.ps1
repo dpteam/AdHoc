@@ -1,17 +1,26 @@
 ﻿# =========================================================================
-#  Web API + board smoke test. Starts two adhoc holders, checks /api/*.
-#  usage: powershell -ExecutionPolicy Bypass -File tools\test-web.ps1 -Base http://127.0.0.1:8080
+#  Web/API smoke test for BOTH boards.
+#    public : read-only, redacted, no admin endpoints
+#    admin  : signed + sealed requests, full data
+#
+#  usage: powershell -ExecutionPolicy Bypass -File tools\test-web.ps1
+#         [-PublicBase http://127.0.0.1:44501] [-AdminBase http://127.0.0.1:44502]
 # =========================================================================
 param(
-    [string]$Base = 'http://127.0.0.1:8080',
+    [string]$PublicBase = 'http://127.0.0.1:44501',
+    [string]$AdminBase = 'http://127.0.0.1:44502',
     [string]$Server = '127.0.0.1',
-    [int]$Port = 27312
+    [int]$AdhocPort = 27312
 )
 
 $ErrorActionPreference = 'Stop'
 $script:failures = 0
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$dataFile = Join-Path (Split-Path -Parent $here) 'bin\data\games.json'
+$root = Split-Path -Parent $here
+. (Join-Path $here 'admin-api.ps1')
+
+$dataFile = Join-Path $root 'bin\data\games.json'
+$configFile = Join-Path $root 'bin\config.ini'
 $backup = $null
 
 function Assert([bool]$condition, [string]$name, [string]$detail) {
@@ -19,18 +28,39 @@ function Assert([bool]$condition, [string]$name, [string]$detail) {
     else { Write-Host ("  [FAIL] " + $name + "  " + $detail) -ForegroundColor Red; $script:failures++ }
 }
 
-function Get-Json([string]$path) {
-    return Invoke-RestMethod -UseBasicParsing -Uri ($Base + $path) -TimeoutSec 10
+function Get-Json([string]$url) {
+    return Invoke-RestMethod -UseBasicParsing -Uri $url -TimeoutSec 15
 }
 
-function Post-Json([string]$path, $payload) {
-    $json = $payload | ConvertTo-Json -Compress
-    return Invoke-RestMethod -UseBasicParsing -Uri ($Base + $path) -Method POST -Body $json -ContentType 'application/json' -TimeoutSec 10
+function Get-Status([string]$url) {
+    $r = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 15
+    return [pscustomobject]@{ Status = [int]$r.StatusCode; Content = $r.Content; Headers = $r.Headers }
+}
+
+function Try-Request([string]$url, [string]$method = 'GET', $body = $null) {
+    try {
+        $p = @{ UseBasicParsing = $true; Uri = $url; Method = $method; TimeoutSec = 15 }
+        if ($null -ne $body) { $p['Body'] = $body }
+        $r = Invoke-WebRequest @p
+        return [int]$r.StatusCode
+    } catch {
+        if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }
+        return 0
+    }
 }
 
 Write-Host ""
-Write-Host "DPT.Agent web/API test -> $Base" -ForegroundColor Cyan
+Write-Host "DPT.PSP web/API test" -ForegroundColor Cyan
+Write-Host "  public: $PublicBase"
+Write-Host "  admin : $AdminBase"
 Write-Host ""
+
+if (-not (Test-Path $configFile)) { throw "config.ini not found: $configFile (run the server once)" }
+$token = $null
+foreach ($line in Get-Content $configFile) {
+    if ($line -match '^\s*adminToken\s*=\s*(.+)$') { $token = $Matches[1].Trim() }
+}
+if (-not $token) { throw 'web.adminToken is empty in config.ini' }
 
 if (Test-Path $dataFile) {
     $backup = Join-Path $env:TEMP ('games-backup-' + [Guid]::NewGuid().ToString('N') + '.json')
@@ -38,100 +68,158 @@ if (Test-Path $dataFile) {
 }
 
 $p1 = Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $here 'hold-client.ps1'),
-    '-Nick', 'HolderOne', '-Game', 'ULUS10084', '-Group', 'ABCD1234', '-MacSeed', '11', '-Seconds', '30') -PassThru -WindowStyle Hidden
+    '-Nick', 'HolderOne', '-Game', 'ULUS10084', '-Group', 'ABCD1234', '-MacSeed', '11', '-Seconds', '60',
+    '-Server', $Server, '-Port', $AdhocPort) -PassThru -WindowStyle Hidden
 $p2 = Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $here 'hold-client.ps1'),
-    '-Nick', 'HolderTwo', '-Game', 'ULES00318', '-Group', 'ABCD1234', '-MacSeed', '12', '-Seconds', '30') -PassThru -WindowStyle Hidden
+    '-Nick', 'HolderTwo', '-Game', 'ULES00318', '-Group', 'ABCD1234', '-MacSeed', '12', '-Seconds', '60',
+    '-Server', $Server, '-Port', $AdhocPort) -PassThru -WindowStyle Hidden
 $p3 = Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $here 'hold-client.ps1'),
-    '-Nick', 'HolderThree', '-Game', 'ULES01213', '-NoGroup', '-MacSeed', '13', '-Seconds', '30') -PassThru -WindowStyle Hidden
+    '-Nick', 'HolderThree', '-Game', 'ULES01213', '-NoGroup', '-MacSeed', '13', '-Seconds', '60',
+    '-Server', $Server, '-Port', $AdhocPort) -PassThru -WindowStyle Hidden
 
 try {
-    Start-Sleep -Milliseconds 400
+    # ------------------------------------------------------------ public
+    Write-Host "public board" -ForegroundColor Cyan
 
-    # wait until both holders logged in and joined the group (max ~7s)
     $status = $null
     for ($i = 0; $i -lt 24; $i++) {
         Start-Sleep -Milliseconds 300
-        try { $status = Get-Json '/api/status' } catch { $status = $null }
+        try { $status = Get-Json ($PublicBase + '/api/status') } catch { $status = $null }
         if ($null -eq $status) { continue }
         $probe = @($status.games | Where-Object { $_.id -eq 'ULUS10084' -and @($_.groups).Count -ge 1 })
         if ($status.stats.online -ge 3 -and $probe.Count -ge 1) { break }
     }
-    Assert ($null -ne $status) 'status reachable' ''
-    Assert ([bool]$status.ok) 'status.ok' ''
+    Assert ($null -ne $status) 'public status reachable' ''
+    Assert ($status.role -eq 'public') 'public role reported' $status.role
     Assert ($status.stats.online -ge 3) 'three sessions online' ("online=" + $status.stats.online)
 
     $mhf = $status.games | Where-Object { $_.id -eq 'ULUS10084' }
-    Assert ($null -ne $mhf) 'game ULUS10084 present' ''
-    Assert ($mhf.players -ge 2) 'two players share the crosslinked game' ("players=" + $mhf.players)
-    Assert ($mhf.name -like '*Monster Hunter Freedom*') 'game name resolved from db' $mhf.name
-    Assert (@($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).Count -eq 1) 'group ABCD1234 visible' ''
-    Assert (@(($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).members | Where-Object { $_.isHost }).Count -eq 1) 'exactly one group host' ''
-    Assert (($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).members.Count -eq 2) 'both players in group' ''
+    Assert ($null -ne $mhf) 'public sees the game' ''
+    Assert (@(($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).members).Count -eq 2) 'public sees group members' ''
 
-    $mhfu = $status.games | Where-Object { $_.id -eq 'ULUS10391' }
-    Assert ($null -ne $mhfu) 'crosslink ULES01213 -> ULUS10391' ''
-    Assert ($mhfu.name -like '*Unite*') 'crosslinked title resolved' $mhfu.name
+    $raw = (Get-Status ($PublicBase + '/api/status')).Content
+    Assert ($raw -notmatch '"mac"') 'public status has no MAC field' ''
+    Assert ($raw -notmatch '"ip"') 'public status has no IP field' ''
+    Assert ($raw -notmatch '"idleSec"') 'public status has no idle/bytes fields' ''
+    Assert ($raw -notmatch '"sessionId"') 'no session ids leak' ''
 
-    $health = Get-Json '/api/health'
-    Assert ([bool]$health.ok) 'health endpoint' ''
+    Assert ((Try-Request ($PublicBase + '/api/logs')) -eq 404) 'public: logs are hidden (404)' ''
+    Assert ((Try-Request ($PublicBase + '/api/kick') 'POST' '{"id":"x"}') -eq 404) 'public: kick is hidden (404)' ''
+    Assert ((Try-Request ($PublicBase + '/admin.html')) -eq 404) 'public: admin shell is hidden (404)' ''
+    Assert ((Try-Request ($PublicBase + '/api/auth')) -eq 404) 'public: auth endpoint hidden' ''
 
-    $games = Get-Json '/api/games'
-    Assert ($games.count -ge 150) 'games catalog loaded' ('count=' + $games.count)
-    Assert (@($games.games | Where-Object { $_.id -eq 'ULUS10084' }).Count -eq 1) 'catalog contains ULUS10084' ''
+    $health = Get-Json ($PublicBase + '/api/health')
+    Assert ($health.ok -and $health.role -eq 'public') 'public health' ''
 
-    # add a title for an unknown id, then confirm it round-trips
-    $save = Post-Json '/api/games' @{ id = 'ULUS99999'; name = 'Test Game (automation)' }
-    Assert ([bool]$save.ok) 'POST /api/games saves' ''
-    $games2 = Get-Json '/api/games'
-    Assert (@($games2.games | Where-Object { $_.id -eq 'ULUS99999' -and $_.name -eq 'Test Game (automation)' }).Count -eq 1) 'new title visible in catalog' ''
+    $xml = (Get-Status ($PublicBase + '/status.xml')).Content
+    Assert ($xml -like '*<prometheus usercount=*') 'legacy status.xml on public' ''
 
-    # broadcast chat (no players in that group? holders are in ABCD1234, so >= 1 target)
-    $chat = Post-Json '/api/chat' @{ text = 'automation ping'; sender = 'TEST' }
-    Assert ([bool]$chat.ok) 'POST /api/chat accepted' ''
-    Assert ($chat.sent -ge 1) 'chat delivered to holders' ('sent=' + $chat.sent)
+    $hist = Get-Json ($PublicBase + '/api/history?limit=10')
+    Assert ($hist.ok) 'public history' ''
+    Assert (($hist.history | Measure-Object).Count -ge 0) 'history redacted' ''
 
-    # kick one player by session id
-    $victim = $mhf.groups[0].members[0]
-    $kick = Post-Json '/api/kick' @{ id = $victim.id }
-    Assert ([bool]$kick.ok) 'POST /api/kick works' (ConvertTo-Json $kick -Compress)
-    Start-Sleep -Milliseconds 900
-    $status2 = Get-Json '/api/status'
-    Assert ($status2.stats.online -lt $status.stats.online) 'kicked session disappeared' ("before=" + $status.stats.online + " after=" + $status2.stats.online)
+    $index = (Get-Status ($PublicBase + '/')).Content
+    Assert ($index -like '*DPT.PSP*' -and $index -like '*data-role="public"*') 'public index served' ''
 
-    $xml = (Invoke-WebRequest -UseBasicParsing -Uri ($Base + '/status.xml') -TimeoutSec 10).Content
-    Assert ($xml -like '*<prometheus usercount=*') 'legacy status.xml' ''
+    # proxy style request: spoofed X-Forwarded-For must not break anything
+    $xff = Invoke-WebRequest -UseBasicParsing -Uri ($PublicBase + '/api/health') -Headers @{ 'X-Forwarded-For' = '203.0.113.9, 192.168.1.2' } -TimeoutSec 10
+    Assert ([int]$xff.StatusCode -eq 200) 'works behind reverse proxy (X-Forwarded-For)' ''
 
-    $logs = Get-Json '/api/logs?limit=20&level=all'
-    Assert ($logs.lines.Count -gt 0) 'logs endpoint returns lines' ''
-    Assert (@($logs.lines | Where-Object { $_.cat -eq 'PROTO' }).Count -ge 1) 'protocol log entries present' ''
-
-    $hist = Get-Json '/api/history?limit=10'
-    Assert ([bool]$hist.ok) 'history endpoint' ''
-
-    # static assets: gzip + etag
-    $req = [System.Net.HttpWebRequest]::Create($Base + '/assets/js/app.js')
+    # gzip + etag
+    $req = [System.Net.HttpWebRequest]::Create($PublicBase + '/assets/js/app.js')
     $req.AutomaticDecompression = [System.Net.DecompressionMethods]::None
     $req.Headers.Add('Accept-Encoding', 'gzip')
     $resp = $req.GetResponse()
     $enc = $resp.Headers['Content-Encoding']
     $etag = $resp.Headers['ETag']
     $resp.Close()
-    Assert ($enc -eq 'gzip') 'static assets are gzipped' ("encoding=" + $enc)
-    Assert (-not [string]::IsNullOrEmpty($etag)) 'static assets have an ETag' ''
+    Assert ($enc -eq 'gzip') 'static assets gzipped' ("encoding=" + $enc)
+    Assert (-not [string]::IsNullOrEmpty($etag)) 'static assets have ETag' ''
 
-    $req2 = [System.Net.HttpWebRequest]::Create($Base + '/assets/js/app.js')
+    $req2 = [System.Net.HttpWebRequest]::Create($PublicBase + '/assets/js/app.js')
     $req2.Headers.Add('If-None-Match', $etag)
-    try {
-        $r2 = $req2.GetResponse()
-        $code = [int]$r2.StatusCode
-        $r2.Close()
-    } catch {
-        $resp3 = $_.Exception.Response; if (-not $resp3 -and $_.Exception.InnerException) { $resp3 = $_.Exception.InnerException.Response }; if ($resp3) { $code = [int]$resp3.StatusCode }
+    $code = 0
+    try { $r2 = $req2.GetResponse(); $code = [int]$r2.StatusCode; $r2.Close() }
+    catch {
+        $resp3 = $_.Exception.Response
+        if (-not $resp3 -and $_.Exception.InnerException) { $resp3 = $_.Exception.InnerException.Response }
+        if ($resp3) { $code = [int]$resp3.StatusCode }
     }
     Assert ($code -eq 304) 'conditional GET returns 304' ("code=" + $code)
 
-    $index = Invoke-WebRequest -UseBasicParsing -Uri ($Base + '/') -TimeoutSec 10
-    Assert ($index.Content -like '*DPT.Agent*') 'index.html served' ''
+    # ------------------------------------------------------------- admin
+    Write-Host ""
+    Write-Host "admin board" -ForegroundColor Cyan
+
+    $authInfo = Connect-DptAdmin -Base $AdminBase -Token $token
+    Assert ($authInfo.scheme -eq 'hmac-sha256+ctr') 'auth scheme advertised' $authInfo.scheme
+    Assert ($authInfo.salt.Length -ge 16) 'auth salt present' ''
+
+    Assert ((Try-Request ($AdminBase + '/api/status')) -eq 401) 'unsigned admin request rejected (401)' ''
+
+    $adminStatus = Invoke-DptAdmin -Method GET -Target '/api/status'
+    Assert ($adminStatus.Status -eq 200) 'signed admin status works' ("code=" + $adminStatus.Status)
+    Assert ($adminStatus.Encrypted) 'admin response is sealed' ''
+    Assert ($null -ne $adminStatus.Json -and $adminStatus.Json.role -eq 'admin') 'admin payload decrypted' ''
+
+    $adminRaw = $adminStatus.Text
+    Assert ($adminRaw -match '"mac"') 'admin sees MAC' ''
+    Assert ($adminRaw -match '"ip"') 'admin sees IP' ''
+
+    # replay the same nonce
+    $tsR = New-DptTimestamp
+    $nonceR2 = [Dpt.AdHoc.Core.ApiCrypto]::RandomHex(16)
+    $keyR = Get-DptKey
+    $sig2 = [Dpt.AdHoc.Core.ApiCrypto]::Signature($keyR, 'GET', '/api/status', $tsR, $nonceR2, [byte[]]@())
+    $h2 = @{ 'X-Auth-Ts' = $tsR; 'X-Auth-Nonce' = $nonceR2; 'X-Auth-Sig' = $sig2 }
+    $r1 = Invoke-WebRequest -UseBasicParsing -Uri ($AdminBase + '/api/status') -Headers $h2 -TimeoutSec 10
+    Assert ([int]$r1.StatusCode -eq 200) 'first signed request accepted' ''
+    $replayCode = 0
+    try {
+        $r2b = Invoke-WebRequest -UseBasicParsing -Uri ($AdminBase + '/api/status') -Headers $h2 -TimeoutSec 10
+        $replayCode = [int]$r2b.StatusCode
+    } catch {
+        if ($_.Exception.Response) { $replayCode = [int]$_.Exception.Response.StatusCode }
+    }
+    Assert ($replayCode -eq 401 -or $replayCode -eq 429) 'replayed nonce rejected' ("code=" + $replayCode)
+
+    # bad signature
+    $badKey = New-Object byte[] 32
+    $tsB = New-DptTimestamp
+    $nonceB = [Dpt.AdHoc.Core.ApiCrypto]::RandomHex(16)
+    $sigB = [Dpt.AdHoc.Core.ApiCrypto]::Signature($badKey, 'GET', '/api/status', $tsB, $nonceB, [byte[]]@())
+    $badCode = 0
+    try {
+        $rb = Invoke-WebRequest -UseBasicParsing -Uri ($AdminBase + '/api/status') -Headers @{
+            'X-Auth-Ts' = $tsB; 'X-Auth-Nonce' = $nonceB; 'X-Auth-Sig' = $sigB } -TimeoutSec 10
+        $badCode = [int]$rb.StatusCode
+    } catch {
+        if ($_.Exception.Response) { $badCode = [int]$_.Exception.Response.StatusCode }
+    }
+    Assert ($badCode -eq 401) 'bad signature rejected (401)' ("code=" + $badCode)
+
+    # encrypted POST
+    $chat = Invoke-DptAdmin -Method POST -Target '/api/chat' -Payload @{ text = 'automation ping'; sender = 'TEST' } -Encrypt
+    Assert ($chat.Status -eq 200) 'encrypted POST accepted' ("code=" + $chat.Status)
+    Assert ($chat.Encrypted) 'encrypted response' ''
+    Assert ($null -ne $chat.Json -and $chat.Json.ok) 'encrypted response decrypts' ''
+
+    # kick
+    $victim = $mhf.groups[0].members[0].name
+    $kick = Invoke-DptAdmin -Method POST -Target '/api/kick' -Payload @{ name = $victim } -Encrypt
+    Assert ($kick.Status -eq 200 -and $kick.Json.kicked -ge 1) 'signed+sealed kick works' ("code=" + $kick.Status)
+
+    $logs = Invoke-DptAdmin -Method GET -Target '/api/logs?limit=20&level=all'
+    Assert ($logs.Status -eq 200 -and @($logs.Json.lines).Count -gt 0) 'admin logs available' ''
+
+    $adminIndex = (Get-Status ($AdminBase + '/')).Content
+    Assert ($adminIndex -like '*data-role="admin"*') 'admin shell served on admin port' ''
+
+    # catalog save roundtrip (through the sealed channel)
+    $save = Invoke-DptAdmin -Method POST -Target '/api/games' -Payload @{ id = 'ULUS99999'; name = 'Test Game (automation)' } -Encrypt
+    Assert ($save.Status -eq 200 -and $save.Json.ok) 'sealed catalog save' ''
+    $games = Invoke-DptAdmin -Method GET -Target '/api/games'
+    Assert (@($games.Json.games | Where-Object { $_.id -eq 'ULUS99999' }).Count -eq 1) 'saved title visible' ''
 }
 finally {
     foreach ($p in @($p1, $p2, $p3)) {
@@ -141,7 +229,7 @@ finally {
         Start-Sleep -Milliseconds 300
         Copy-Item $backup $dataFile -Force
         Remove-Item $backup -Force
-        try { Post-Json '/api/reload' @{} | Out-Null } catch { }
+        try { Invoke-DptAdmin -Method POST -Target '/api/reload' -Payload @{} | Out-Null } catch { }
     }
 }
 

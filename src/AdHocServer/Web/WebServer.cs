@@ -11,12 +11,30 @@ using Dpt.AdHoc.Core;
 
 namespace Dpt.AdHoc.Web
 {
+    public enum WebRole
+    {
+        Public = 0,
+        Admin = 1
+    }
+
+    /// <summary>Result of checking the admin request signature.</summary>
+    public sealed class AuthContext
+    {
+        public bool Ok;
+        public bool Encrypted;
+        public bool Blocked;
+        public string Error = "";
+    }
+
     /// <summary>
     /// Embedded HTTP server built directly on TcpListener.
     ///
-    /// Why not HttpListener: on Windows it requires an URL ACL (admin), refuses to bind
-    /// to a LAN address without it and behaves differently on XP. A game server must
-    /// simply work after double click, so we speak HTTP/1.1 ourselves.
+    /// Two instances live side by side and share the same ServerState:
+    ///   * Public  - read-only board, redacted data, meant to be exposed through a reverse proxy
+    ///   * Admin   - full board (logs, kick, chat, catalog editing), signed + encrypted API
+    ///
+    /// Reverse proxy aware: trusts X-Forwarded-For / X-Real-IP only from private/loopback peers,
+    /// strips X-Forwarded-Prefix and an optional configured base path, rate limits per real client.
     /// </summary>
     public sealed class WebServer
     {
@@ -26,10 +44,23 @@ namespace Dpt.AdHoc.Web
             public int Count;
         }
 
+        private sealed class FailWindow
+        {
+            public DateTime StartUtc;
+            public int Count;
+            public DateTime BlockedUntilUtc;
+        }
+
         private readonly ServerApp _app;
         private readonly Config _cfg;
+        private readonly WebRole _role;
+        private readonly byte[] _key;
+        private readonly string _basePath;
+        private readonly NonceCache _nonces = new NonceCache(TimeSpan.FromMinutes(10), 20000);
+
         private readonly object _rateLock = new object();
         private readonly Dictionary<string, RateWindow> _rate = new Dictionary<string, RateWindow>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, FailWindow> _authFails = new Dictionary<string, FailWindow>(StringComparer.OrdinalIgnoreCase);
 
         private TcpListener _listener;
         private Thread _acceptThread;
@@ -43,26 +74,51 @@ namespace Dpt.AdHoc.Web
 
         public event EventHandler Failed;
 
-        public WebServer(ServerApp app)
+        public WebServer(ServerApp app, WebRole role)
         {
             _app = app;
             _cfg = app.Cfg;
+            _role = role;
             _root = ResolveWebRoot(app.Cfg);
-            _bind = string.IsNullOrEmpty(app.Cfg.WebBindAddress) ? "0.0.0.0" : app.Cfg.WebBindAddress.Trim();
+            _basePath = role == WebRole.Admin ? app.Cfg.AdminBasePath : app.Cfg.PublicBasePath;
+            _bind = role == WebRole.Admin ? app.Cfg.AdminBind : app.Cfg.PublicBind;
+            if (string.IsNullOrEmpty(_bind)) _bind = "0.0.0.0";
+
+            if (role == WebRole.Admin)
+            {
+                try
+                {
+                    _key = ApiCrypto.DeriveKey(app.Cfg.AdminToken, app.Cfg.AdminSalt, app.Cfg.AdminKdfIterations);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("WEB", "cannot derive admin key: " + ex.Message);
+                    _key = null;
+                }
+            }
         }
 
         public ServerApp App { get { return _app; } }
         public Config Config { get { return _cfg; } }
+        public WebRole Role { get { return _role; } }
+        public bool IsAdmin { get { return _role == WebRole.Admin; } }
+        public string RoleName { get { return _role == WebRole.Admin ? "admin" : "public"; } }
         public int Port { get { return _port; } }
         public string BindAddress { get { return _bind; } }
+        public string BasePath { get { return _basePath; } }
         public string Root { get { return _root; } }
+        public byte[] AdminKey { get { return _key; } }
         public long Requests { get { return Interlocked.Read(ref _requests); } }
         public long Errors { get { return Interlocked.Read(ref _errors); } }
         public int Inflight { get { return Interlocked.CompareExchange(ref _inflight, 0, 0); } }
 
         public string BaseUrl
         {
-            get { return "http://" + (_bind == "0.0.0.0" ? "localhost" : _bind) + ":" + _port.ToString(CultureInfo.InvariantCulture) + "/"; }
+            get
+            {
+                string host = _bind == "0.0.0.0" ? "localhost" : _bind;
+                return "http://" + host + ":" + _port.ToString(CultureInfo.InvariantCulture) + _basePath + "/";
+            }
         }
 
         public bool IsRunning
@@ -99,18 +155,21 @@ namespace Dpt.AdHoc.Web
         {
             if (_running) return true;
 
+            int primary = _role == WebRole.Admin ? _cfg.AdminPort : _cfg.PublicPort;
+            int[] fallbacks = _role == WebRole.Admin ? _cfg.AdminPortFallbacks : _cfg.PublicPortFallbacks;
+
             List<int> ports = new List<int>();
-            ports.Add(_cfg.WebPort);
-            if (_cfg.WebPortFallbacks != null)
-                for (int i = 0; i < _cfg.WebPortFallbacks.Length; i++)
+            ports.Add(primary);
+            if (fallbacks != null)
+                for (int i = 0; i < fallbacks.Length; i++)
                 {
-                    int p = _cfg.WebPortFallbacks[i];
+                    int p = fallbacks[i];
                     if (p > 0 && p <= 65535 && !ports.Contains(p)) ports.Add(p);
                 }
 
             IPAddress bindAddress = ResolveBindAddress(_bind);
-
             Exception last = null;
+
             for (int i = 0; i < ports.Count; i++)
             {
                 int port = ports[i];
@@ -119,23 +178,25 @@ namespace Dpt.AdHoc.Web
                     TcpListener listener = new TcpListener(bindAddress, port);
                     listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                     listener.Start(256);
-
                     _listener = listener;
                     _port = port;
                     _running = true;
 
                     _acceptThread = new Thread(AcceptLoop);
                     _acceptThread.IsBackground = true;
-                    _acceptThread.Name = "web-accept";
+                    _acceptThread.Name = "web-" + RoleName + "-accept";
                     _acceptThread.Start();
 
-                    Log.Info("WEB", "web ui listening on " + _bind + ":" + port.ToString(CultureInfo.InvariantCulture) +
-                                    " (root: " + _root + ")");
-                    if (port != _cfg.WebPort)
-                        Log.Warn("WEB", "port " + _cfg.WebPort + " is busy, web ui moved to " + port);
+                    Log.Info("WEB", RoleName + " ui listening on " + _bind + ":" + port.ToString(CultureInfo.InvariantCulture) +
+                                    (_basePath.Length > 0 ? " base=" + _basePath : "") + " (root: " + _root + ")");
+                    if (port != primary)
+                        Log.Warn("WEB", RoleName + " port " + primary + " is busy, using " + port);
+                    if (_role == WebRole.Admin && _cfg.AdminPrivateOnly)
+                        Log.Info("WEB", "admin ui accepts private/LAN addresses only (web.adminPrivateOnly=true)");
+
                     string[] lan = LocalAddresses();
                     for (int a = 0; a < lan.Length; a++)
-                        Log.Info("WEB", "open http://" + lan[a] + ":" + port.ToString(CultureInfo.InvariantCulture) + "/");
+                        Log.Info("WEB", RoleName + " url: http://" + lan[a] + ":" + port.ToString(CultureInfo.InvariantCulture) + _basePath + "/");
                     return true;
                 }
                 catch (Exception ex)
@@ -143,11 +204,11 @@ namespace Dpt.AdHoc.Web
                     last = ex;
                     try { if (_listener != null) _listener.Stop(); } catch { }
                     _listener = null;
-                    Log.Warn("WEB", "cannot bind " + _bind + ":" + port.ToString(CultureInfo.InvariantCulture) + ": " + ex.Message);
+                    Log.Warn("WEB", RoleName + " cannot bind " + _bind + ":" + port.ToString(CultureInfo.InvariantCulture) + ": " + ex.Message);
                 }
             }
 
-            Log.Error("WEB", "web ui failed to start on every candidate port. Last error: " +
+            Log.Error("WEB", RoleName + " ui failed to start on every candidate port. Last error: " +
                              (last == null ? "unknown" : last.Message));
             return false;
         }
@@ -161,7 +222,6 @@ namespace Dpt.AdHoc.Web
             return IPAddress.Any;
         }
 
-        /// <summary>All usable IPv4 addresses of this machine (for the logs / console).</summary>
         public string[] LocalAddresses()
         {
             List<string> list = new List<string>();
@@ -184,7 +244,7 @@ namespace Dpt.AdHoc.Web
 
         public bool Restart()
         {
-            Log.Warn("WEB", "restarting web listener");
+            Log.Warn("WEB", "restarting " + RoleName + " listener");
             try { Stop(); } catch { }
             Thread.Sleep(300);
             return Start();
@@ -198,8 +258,150 @@ namespace Dpt.AdHoc.Web
             _listener = null;
             try { if (_acceptThread != null && _acceptThread.IsAlive) _acceptThread.Join(2000); } catch { }
             _acceptThread = null;
-            if (was) Log.Info("WEB", "web ui stopped");
+            if (was) Log.Info("WEB", RoleName + " ui stopped");
         }
+
+        // ------------------------------------------------------- proxy helpers
+
+        /// <summary>Real client address. Honours X-Forwarded-For / X-Real-IP from trusted peers only.</summary>
+        public string EffectiveClientIp(HttpRequest req)
+        {
+            string peer = req.RemoteIp ?? "0.0.0.0";
+            if (!_cfg.TrustProxyHeaders) return peer;
+            if (!IsTrustedProxy(peer)) return peer;
+
+            string chain = req.Header("X-Forwarded-For");
+            if (string.IsNullOrEmpty(chain)) chain = req.Header("X-Real-IP");
+            if (string.IsNullOrEmpty(chain)) return peer;
+
+            string[] parts = chain.Split(',');
+            for (int i = parts.Length - 1; i >= 0; i--)
+            {
+                string candidate = StripPort(parts[i].Trim());
+                if (candidate.Length == 0) continue;
+                if (!IsTrustedProxy(candidate)) return candidate;
+            }
+            return peer;
+        }
+
+        private static string StripPort(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            // "1.2.3.4:5678" but keep IPv6 like "::1" or "[::1]:80"
+            if (value.StartsWith("[", StringComparison.Ordinal))
+            {
+                int end = value.IndexOf(']');
+                return end > 1 ? value.Substring(1, end - 1) : value;
+            }
+            int first = value.IndexOf(':');
+            int last = value.LastIndexOf(':');
+            if (first > 0 && first == last) return value.Substring(0, first);
+            return value;
+        }
+
+        private bool IsTrustedProxy(string ip)
+        {
+            if (string.IsNullOrEmpty(ip)) return false;
+            if (ip == "::1" || ip == "127.0.0.1") return true;
+            if (IsPrivateIpv4(ip)) return true;
+            List<Cidr> list = ParseCidrs(_cfg.TrustedProxies);
+            for (int i = 0; i < list.Count; i++)
+                if (list[i].Contains(ip)) return true;
+            return false;
+        }
+
+        public static bool IsPrivateIpv4(string ip)
+        {
+            IPAddress addr;
+            if (!IPAddress.TryParse(ip, out addr)) return false;
+            byte[] b = addr.GetAddressBytes();
+            if (b.Length != 4) return ip == "::1";
+            if (b[0] == 10) return true;
+            if (b[0] == 127) return true;
+            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
+            if (b[0] == 192 && b[1] == 168) return true;
+            if (b[0] == 169 && b[1] == 254) return true;
+            return false;
+        }
+
+        private sealed class Cidr
+        {
+            public uint Network;
+            public int Bits;
+
+            public bool Contains(string ip)
+            {
+                IPAddress addr;
+                if (!IPAddress.TryParse(ip, out addr)) return false;
+                byte[] b = addr.GetAddressBytes();
+                if (b.Length != 4) return false;
+                uint value = ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3];
+                if (Bits == 0) return true;
+                uint mask = 0xFFFFFFFFu << (32 - Bits);
+                return (value & mask) == (Network & mask);
+            }
+        }
+
+        private static List<Cidr> ParseCidrs(string text)
+        {
+            List<Cidr> list = new List<Cidr>();
+            if (string.IsNullOrEmpty(text)) return list;
+            string[] parts = text.Split(new char[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string item = parts[i].Trim();
+                if (item.Length == 0) continue;
+                int slash = item.IndexOf('/');
+                string ipPart = slash < 0 ? item : item.Substring(0, slash);
+                int bits = 32;
+                if (slash > 0) int.TryParse(item.Substring(slash + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out bits);
+                IPAddress addr;
+                if (!IPAddress.TryParse(ipPart, out addr)) continue;
+                byte[] b = addr.GetAddressBytes();
+                if (b.Length != 4) continue;
+                list.Add(new Cidr
+                {
+                    Network = ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3],
+                    Bits = Config.Clamp(bits, 0, 32)
+                });
+            }
+            return list;
+        }
+
+        /// <summary>Strips the configured base path and X-Forwarded-Prefix from the request path.</summary>
+        public string MapPath(HttpRequest req)
+        {
+            string path = req.Path ?? "/";
+            string prefix = null;
+
+            if (!string.IsNullOrEmpty(_basePath) &&
+                (path.Equals(_basePath, StringComparison.OrdinalIgnoreCase) ||
+                 path.StartsWith(_basePath + "/", StringComparison.OrdinalIgnoreCase)))
+            {
+                prefix = _basePath;
+            }
+            else
+            {
+                string forwarded = req.Header("X-Forwarded-Prefix");
+                if (!string.IsNullOrEmpty(forwarded))
+                {
+                    string f = Config.NormalizeBasePath(forwarded);
+                    if (!string.IsNullOrEmpty(f) &&
+                        (path.Equals(f, StringComparison.OrdinalIgnoreCase) ||
+                         path.StartsWith(f + "/", StringComparison.OrdinalIgnoreCase)))
+                        prefix = f;
+                }
+            }
+
+            if (prefix != null)
+            {
+                path = path.Substring(prefix.Length);
+                if (path.Length == 0) path = "/";
+            }
+            return path.Length == 0 ? "/" : path;
+        }
+
+        // -------------------------------------------------------------- accept
 
         private void AcceptLoop()
         {
@@ -218,7 +420,7 @@ namespace Dpt.AdHoc.Web
                 {
                     if (!_running) break;
                     failures++;
-                    Log.Warn("WEB", "accept failed (" + sex.SocketErrorCode + "): " + sex.Message);
+                    Log.Warn("WEB", RoleName + " accept failed (" + sex.SocketErrorCode + "): " + sex.Message);
                     if (failures >= 25) { RaiseFailed(); break; }
                     Thread.Sleep(Math.Min(2000, 50 * failures));
                     continue;
@@ -227,7 +429,7 @@ namespace Dpt.AdHoc.Web
                 {
                     if (!_running) break;
                     failures++;
-                    Log.Error("WEB", "unexpected accept error: " + ex.Message);
+                    Log.Error("WEB", RoleName + " unexpected accept error: " + ex.Message);
                     if (failures >= 25) { RaiseFailed(); break; }
                     Thread.Sleep(100);
                     continue;
@@ -257,7 +459,7 @@ namespace Dpt.AdHoc.Web
                     try { client.Close(); } catch { }
                 }
             }
-            Log.Debug("WEB", "accept loop finished");
+            Log.Debug("WEB", RoleName + " accept loop finished");
         }
 
         private void RaiseFailed()
@@ -291,14 +493,10 @@ namespace Dpt.AdHoc.Web
                     conn.RemotePort = ep.Port;
                 }
 
-                if (!RateAllowed(conn.RemoteIp))
+                if (_role == WebRole.Admin && _cfg.AdminPrivateOnly && !IsPrivateIpv4(conn.RemoteIp) && conn.RemoteIp != "::1")
                 {
-                    HttpResponse busy = new HttpResponse();
-                    busy.Status = 429;
-                    busy.ContentType = "application/json; charset=utf-8";
-                    busy.Body = Encoding.UTF8.GetBytes("{\"ok\":false,\"error\":\"rate limit\"}");
-                    busy.Set("Retry-After", "5");
-                    conn.WriteResponse(busy, false, false);
+                    Log.Warn("WEB", "admin request from non private address " + conn.RemoteIp + " rejected");
+                    try { conn.WriteSimple(403, "Admin board is LAN only (web.adminPrivateOnly).", true); } catch { }
                     return;
                 }
 
@@ -317,14 +515,8 @@ namespace Dpt.AdHoc.Web
                         try { conn.WriteSimple(hpe.Status, HttpResponse.Reason(hpe.Status), true); } catch { }
                         break;
                     }
-                    catch (IOException)
-                    {
-                        break;
-                    }
-                    catch (SocketException)
-                    {
-                        break;
-                    }
+                    catch (IOException) { break; }
+                    catch (SocketException) { break; }
 
                     if (!ok)
                     {
@@ -338,19 +530,33 @@ namespace Dpt.AdHoc.Web
                     served++;
                     Interlocked.Increment(ref _requests);
 
+                    string clientIp = EffectiveClientIp(req);
+                    if (!RateAllowed(clientIp))
+                    {
+                        HttpResponse busy = new HttpResponse();
+                        busy.Status = 429;
+                        busy.ContentType = "application/json; charset=utf-8";
+                        busy.Body = Encoding.UTF8.GetBytes("{\"ok\":false,\"error\":\"rate limit\"}");
+                        busy.Set("Retry-After", "5");
+                        ApplySecurityHeaders(busy);
+                        conn.WriteResponse(busy, false, false);
+                        break;
+                    }
+
                     HttpResponse resp = new HttpResponse();
                     try
                     {
-                        Route(req, resp);
+                        Route(req, resp, clientIp);
                     }
                     catch (Exception ex)
                     {
                         Interlocked.Increment(ref _errors);
-                        Log.Error("WEB", "request " + req.Method + " " + req.Path + " failed: " + ex);
+                        Log.Error("WEB", RoleName + " request " + req.Method + " " + req.Target + " failed: " + ex);
                         resp = new HttpResponse();
                         resp.Status = 500;
                         resp.ContentType = "application/json; charset=utf-8";
                         resp.Body = Encoding.UTF8.GetBytes("{\"ok\":false,\"error\":\"internal server error\"}");
+                        ApplySecurityHeaders(resp);
                     }
 
                     bool keep = req.KeepAlive && served < 100;
@@ -358,13 +564,8 @@ namespace Dpt.AdHoc.Web
                     if (!keep) break;
                 }
             }
-            catch (IOException)
-            {
-                // client vanished mid-request
-            }
-            catch (ObjectDisposedException)
-            {
-            }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
                 Interlocked.Increment(ref _errors);
@@ -394,7 +595,7 @@ namespace Dpt.AdHoc.Web
                     _rate[ip] = w;
                 }
                 w.Count++;
-                if (_rate.Count > 2000 && w.Count == 1) PruneRateLocked(now);
+                if (_rate.Count > 4000 && w.Count == 1) PruneRateLocked(now);
                 return w.Count <= limit;
             }
         }
@@ -407,23 +608,173 @@ namespace Dpt.AdHoc.Web
             for (int i = 0; i < dead.Count; i++) _rate.Remove(dead[i]);
         }
 
+        private bool AuthBlocked(string ip)
+        {
+            lock (_rateLock)
+            {
+                FailWindow w;
+                if (!_authFails.TryGetValue(ip, out w)) return false;
+                if (w.BlockedUntilUtc > DateTime.UtcNow) return true;
+                return false;
+            }
+        }
+
+        private void RegisterAuthFailure(string ip)
+        {
+            DateTime now = DateTime.UtcNow;
+            lock (_rateLock)
+            {
+                FailWindow w;
+                if (!_authFails.TryGetValue(ip, out w) || (now - w.StartUtc).TotalSeconds > 300)
+                {
+                    w = new FailWindow();
+                    w.StartUtc = now;
+                    w.Count = 0;
+                    _authFails[ip] = w;
+                }
+                w.Count++;
+                if (w.Count >= 20)
+                {
+                    w.BlockedUntilUtc = now.AddMinutes(5);
+                    w.Count = 0;
+                    w.StartUtc = now;
+                    Log.Warn("WEB", "admin auth failures from " + ip + ": blocked for 5 minutes");
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------- auth
+
+        public AuthContext Authenticate(HttpRequest req)
+        {
+            AuthContext ctx = new AuthContext();
+            if (_role != WebRole.Admin) { ctx.Ok = true; return ctx; }
+
+            string ip = EffectiveClientIp(req);
+            if (AuthBlocked(ip))
+            {
+                ctx.Blocked = true;
+                ctx.Error = "too many failed attempts";
+                return ctx;
+            }
+            if (_key == null)
+            {
+                ctx.Error = "server has no admin key";
+                return ctx;
+            }
+
+            string ts = req.Header("X-Auth-Ts");
+            string nonce = req.Header("X-Auth-Nonce");
+            string sig = req.Header("X-Auth-Sig");
+
+            if (string.IsNullOrEmpty(ts) || string.IsNullOrEmpty(nonce) || string.IsNullOrEmpty(sig))
+            {
+                ctx.Error = "signed request required";
+                RegisterAuthFailure(ip);
+                return ctx;
+            }
+            if (!ApiCrypto.IsFreshTimestamp(ts, DateTime.UtcNow))
+            {
+                ctx.Error = "stale or skewed timestamp";
+                RegisterAuthFailure(ip);
+                return ctx;
+            }
+            if (!ApiCrypto.IsValidNonce(nonce))
+            {
+                ctx.Error = "malformed nonce";
+                RegisterAuthFailure(ip);
+                return ctx;
+            }
+
+            // Canonical target is the *application relative* path+query, so it works both when the
+            // reverse proxy strips its prefix and when it forwards it (we strip it too).
+            string canonicalTarget = req.Path ?? "/";
+            if (!string.IsNullOrEmpty(req.Query)) canonicalTarget += "?" + req.Query;
+
+            string expected = ApiCrypto.Signature(_key, req.Method, canonicalTarget, ts, nonce, req.Body);
+            if (!ApiCrypto.FixedEquals(expected, sig))
+            {
+                ctx.Error = "bad signature";
+                RegisterAuthFailure(ip);
+                return ctx;
+            }
+            if (!_nonces.TryUse(nonce))
+            {
+                ctx.Error = "replayed request";
+                RegisterAuthFailure(ip);
+                return ctx;
+            }
+
+            bool encrypted = string.Equals(req.Header("X-Auth-Enc") ?? "", "1", StringComparison.Ordinal);
+            if (encrypted)
+            {
+                if (!_cfg.AdminEncrypt)
+                {
+                    ctx.Error = "encrypted bodies are disabled";
+                    return ctx;
+                }
+                byte[] plain = ApiCrypto.Open(_key, req.BodyText());
+                if (plain == null)
+                {
+                    ctx.Error = "cannot decrypt body";
+                    RegisterAuthFailure(ip);
+                    return ctx;
+                }
+                req.Body = plain;
+            }
+
+            ctx.Ok = true;
+            ctx.Encrypted = encrypted;
+            return ctx;
+        }
+
+        /// <summary>Encrypts a JSON body when the request came in encrypted.</summary>
+        public void SealResponse(AuthContext auth, HttpResponse resp)
+        {
+            if (auth == null || !auth.Ok) return;
+            if (!_cfg.AdminEncrypt || _key == null) return;
+            if (resp == null || resp.Status != 200) return;
+            if (resp.Body == null || resp.Body.Length == 0) return;
+
+            // the body may have been gzipped for the wire - seal the plain payload instead
+            string encoding;
+            if (resp.Headers.TryGetValue("Content-Encoding", out encoding) &&
+                encoding != null && encoding.IndexOf("gzip", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                try { resp.Body = Gunzip(resp.Body); }
+                catch { return; } // never send a half-broken body
+            }
+
+            resp.Body = Encoding.ASCII.GetBytes(ApiCrypto.Seal(_key, resp.Body));
+            resp.Set("X-Enc-Resp", "1");
+            resp.Set("Content-Encoding", null);
+            resp.Set("Vary", null);
+            resp.ContentType = "text/plain; charset=utf-8";
+        }
+
         // --------------------------------------------------------------- routing
 
-        private void Route(HttpRequest req, HttpResponse resp)
+        private void Route(HttpRequest req, HttpResponse resp, string clientIp)
         {
-            string path = req.Path;
-            if (string.IsNullOrEmpty(path)) path = "/";
+            string path = MapPath(req);
+            req.Path = path;
 
             if (path.Equals("/status.xml", StringComparison.OrdinalIgnoreCase))
             {
-                WebApi.Handle(this, req, resp);
+                WebApi.Handle(this, req, resp, clientIp);
                 return;
             }
 
             if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             {
-                if (!WebApi.Handle(this, req, resp))
-                    SendJson(req, resp, 404, "{\"ok\":false,\"error\":\"unknown endpoint\"}");
+                Log.Verbose("WEB", RoleName + " api " + req.Method + " " + path + " from " + clientIp);
+                if (!WebApi.Handle(this, req, resp, clientIp))
+                {
+                    resp.Status = 404;
+                    resp.ContentType = "application/json; charset=utf-8";
+                    resp.Body = Encoding.UTF8.GetBytes("{\"ok\":false,\"error\":\"unknown endpoint\"}");
+                    ApplySecurityHeaders(resp);
+                }
                 return;
             }
 
@@ -475,7 +826,17 @@ namespace Dpt.AdHoc.Web
             }
 
             string relative = urlPath;
-            if (relative == "/" || relative.Length == 0) relative = "/index.html";
+            if (relative == "/" || relative.Length == 0)
+                relative = _role == WebRole.Admin ? "/admin.html" : "/index.html";
+
+            // the public board never serves the admin shell
+            if (_role != WebRole.Admin &&
+                (relative.Equals("/admin.html", StringComparison.OrdinalIgnoreCase) ||
+                 relative.Equals("/admin", StringComparison.OrdinalIgnoreCase)))
+            {
+                SendText(req, resp, 404, "Not found");
+                return;
+            }
 
             if (relative.Equals("/favicon.ico", StringComparison.OrdinalIgnoreCase))
             {
@@ -486,14 +847,15 @@ namespace Dpt.AdHoc.Web
             string file = ResolveSafe(relative);
             if (file == null)
             {
-                Log.Warn("WEB", "path traversal attempt: " + urlPath);
+                Log.Warn("WEB", "path traversal attempt: " + req.Target);
                 SendText(req, resp, 400, "Bad request");
                 return;
             }
 
             if (Directory.Exists(file))
             {
-                string index = Path.Combine(file, "index.html");
+                string index = Path.Combine(file, _role == WebRole.Admin ? "admin.html" : "index.html");
+                if (!File.Exists(index)) index = Path.Combine(file, "index.html");
                 if (File.Exists(index)) { SendFile(req, resp, index, MimeFor(index), false); return; }
                 SendText(req, resp, 403, "Forbidden");
                 return;
@@ -546,6 +908,7 @@ namespace Dpt.AdHoc.Web
                 resp.ContentType = null;
                 resp.Set("ETag", etag);
                 resp.Set("Cache-Control", longCache ? "public, max-age=300" : "no-cache");
+                ApplySecurityHeaders(resp);
                 return;
             }
 
@@ -558,8 +921,6 @@ namespace Dpt.AdHoc.Web
             resp.Set("ETag", etag);
             resp.Set("Last-Modified", lastWrite.ToString("R", CultureInfo.InvariantCulture));
             resp.Set("Cache-Control", longCache ? "public, max-age=300" : "no-cache, must-revalidate");
-            resp.Set("X-Content-Type-Options", "nosniff");
-            resp.Set("Referrer-Policy", "no-referrer");
 
             if (gzip)
             {
@@ -571,6 +932,7 @@ namespace Dpt.AdHoc.Web
             {
                 resp.Body = data;
             }
+            ApplySecurityHeaders(resp);
         }
 
         private static bool CheckNotModified(HttpRequest req, string etag, DateTime lastWriteUtc)
@@ -582,9 +944,7 @@ namespace Dpt.AdHoc.Web
                 string[] candidates = inm.Split(',');
                 string wanted = NormalizeEtag(etag);
                 for (int i = 0; i < candidates.Length; i++)
-                {
                     if (NormalizeEtag(candidates[i]) == wanted) return true;
-                }
             }
             string ims = req.Header("If-Modified-Since");
             if (!string.IsNullOrEmpty(ims))
@@ -599,7 +959,6 @@ namespace Dpt.AdHoc.Web
             return false;
         }
 
-        /// <summary>Weak compare: ignore W/ prefix, quotes and whitespace, so any client works.</summary>
         private static string NormalizeEtag(string value)
         {
             if (value == null) return "";
@@ -610,6 +969,22 @@ namespace Dpt.AdHoc.Web
         }
 
         // ----------------------------------------------------------- output
+
+        public void ApplySecurityHeaders(HttpResponse resp)
+        {
+            if (resp == null) return;
+            resp.Set("X-Content-Type-Options", "nosniff");
+            resp.Set("X-Frame-Options", "DENY");
+            resp.Set("Referrer-Policy", "no-referrer");
+            resp.Set("Cross-Origin-Resource-Policy", "same-origin");
+            resp.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+            resp.Set("Content-Security-Policy",
+                "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; " +
+                "object-src 'none'; img-src 'self' data:; " +
+                "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+                "font-src 'self' https://cdnjs.cloudflare.com data:; " +
+                "script-src 'self'; connect-src 'self'");
+        }
 
         public void SendText(HttpRequest req, HttpResponse resp, int status, string text)
         {
@@ -632,7 +1007,6 @@ namespace Dpt.AdHoc.Web
             if (data == null) data = new byte[0];
             resp.Status = status;
             resp.ContentType = contentType;
-            resp.Set("X-Content-Type-Options", "nosniff");
             resp.Set("Cache-Control", longCache ? "public, max-age=300" : "no-store, no-cache, must-revalidate");
             if (!string.IsNullOrEmpty(etag)) resp.Set("ETag", etag);
 
@@ -648,6 +1022,7 @@ namespace Dpt.AdHoc.Web
             {
                 resp.Body = data;
             }
+            ApplySecurityHeaders(resp);
         }
 
         public static byte[] Gzip(byte[] input)
@@ -662,11 +1037,26 @@ namespace Dpt.AdHoc.Web
             }
         }
 
+        public static byte[] Gunzip(byte[] input)
+        {
+            using (MemoryStream inputStream = new MemoryStream(input))
+            using (GZipStream gz = new GZipStream(inputStream, CompressionMode.Decompress))
+            using (MemoryStream outStream = new MemoryStream(input.Length * 3 + 64))
+            {
+                byte[] buffer = new byte[8192];
+                int n;
+                while ((n = gz.Read(buffer, 0, buffer.Length)) > 0) outStream.Write(buffer, 0, n);
+                return outStream.ToArray();
+            }
+        }
+
         public string StatusLine()
         {
-            return "http " + _bind + ":" + _port.ToString(CultureInfo.InvariantCulture) + " | requests " +
-                   Interlocked.Read(ref _requests).ToString(CultureInfo.InvariantCulture) + " | errors " +
-                   Interlocked.Read(ref _errors).ToString(CultureInfo.InvariantCulture) + " | inflight " + Inflight;
+            return RoleName + " http://" + _bind + ":" + _port.ToString(CultureInfo.InvariantCulture) +
+                   (_basePath.Length > 0 ? _basePath : "") +
+                   " | requests " + Interlocked.Read(ref _requests).ToString(CultureInfo.InvariantCulture) +
+                   " | errors " + Interlocked.Read(ref _errors).ToString(CultureInfo.InvariantCulture) +
+                   " | inflight " + Inflight;
         }
     }
 }

@@ -48,6 +48,6 @@ echo [4/4] done.
 echo.
 echo   exe   : %OUT%\AdHocServer.exe
 echo   run   : run.cmd
-echo   web   : http://localhost:8080/  (see bin\config.ini)
+echo   public: http://localhost:44501/   admin: http://localhost:44502/  (bin\config.ini)
 echo.
 endlocal

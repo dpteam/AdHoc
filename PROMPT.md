@@ -48,3 +48,34 @@ public\HTML на красивом CSS JS fas fa ease стиль как у Facebo
    для LAN-префиксов, а на XP ведёт себя иначе. Теперь `netsh` не нужен вообще.
 3. Вместо SQLite — свой JSON (`data/games.json`) и свой мини-JSON, чтобы не тащить зависимости.
 4. Мягкий режим протокола: странный пакет не убивает сессию, а логируется (диагностика важнее).
+
+---
+
+## Итерация 2 — две морды, DPT.PSP, защита API, экзотические порты
+
+Сделано:
+
+- [x] Логотип/бренд переименован в **DPT.PSP / AdHoc Server** (сервер, консоль, веб, доки).
+- [x] Две независимые доски в одном процессе (общий `ServerState`, синхронизация бесплатная):
+      - **public** `44501` (fallbacks 44503/44505) — только просмотр, без MAC/IP/session id/логов/
+        модерации; сервер физически не отдаёт эти поля;
+      - **admin** `44502` (fallbacks 44504/44506) — полная доска (кик, чат, баны, каталог, лог).
+      Админская по умолчанию принимает только приватные/LAN-адреса (`web.adminPrivateOnly`).
+- [x] Админский API: токен не уходит по сети; `PBKDF2-HMAC-SHA256(token, salt, 12000)` +
+      HMAC-подпись (method/target/ts/nonce/body hash), анти-replay по nonce (±180 c),
+      шифрование тел и ответов (HMAC-CTR + encrypt-then-MAC), постоянное время сравнения,
+      троттлинг неудач, CSP/XFO/nosniff. Своя реализация SHA-256/HMAC/PBKDF2 на ES5 в браузере
+      (WebCrypto недоступен на http:// в LAN). Детали и границы — `docs/SECURITY.md`.
+- [x] Токен и соль генерируются при первом запуске и сохраняются в `config.ini`.
+- [x] Порты по умолчанию: adhoc `27312`, public `44501`, admin `44502` (все с fallback).
+- [x] Совместимость с reverse proxy (NGinx Proxy Manager / NAT hairpin): доверие
+      `X-Forwarded-For`/`X-Real-IP` только от приватных пиров, rate limit по реальному клиенту,
+      поддержка под-пути (`X-Forwarded-Prefix`, `publicBasePath`), относительные ссылки в UI,
+      `/api/health` для health-check, без `netsh`/URL ACL.
+- [x] Тесты обновлены: `tools/test-web.ps1` проверяет обе доски (вычистка, скрытые эндпоинты,
+      подпись, sealed-ответы, replay, битая подпись, кик, чат, каталог), `tools/admin-api.ps1` —
+      клиент админского API, который берёт `ApiCrypto` прямо из exe.
+- [x] Документация: `docs/SECURITY.md`, обновлены `docs/API.md`, `docs/ARCHITECTURE.md`, `README.md`.
+
+Что осознанно не делалось: TLS внутри сервера (терминируется на NPM), 2FA/TOTP, HTTPS для
+adhoc-порта (ограничение PPSSPP).

@@ -25,6 +25,7 @@ namespace Dpt.AdHoc
             string levelOverride = null;
             int? adhocPort = null;
             int? webPort = null;
+            int? adminPort = null;
 
             try
             {
@@ -35,6 +36,7 @@ namespace Dpt.AdHoc
                     else if (string.Equals(a, "--level", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) levelOverride = args[++i];
                     else if (string.Equals(a, "--adhoc-port", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) adhocPort = ParseInt(args[++i]);
                     else if (string.Equals(a, "--web-port", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) webPort = ParseInt(args[++i]);
+                    else if (string.Equals(a, "--admin-port", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) adminPort = ParseInt(args[++i]);
                     else if (string.Equals(a, "--help", StringComparison.OrdinalIgnoreCase) || string.Equals(a, "-h", StringComparison.OrdinalIgnoreCase))
                     {
                         PrintUsage();
@@ -56,8 +58,10 @@ namespace Dpt.AdHoc
             Config cfg = Config.Load(baseDir);
             if (levelOverride != null) cfg.LogLevel = Config.ParseLevel(levelOverride);
             if (adhocPort.HasValue && adhocPort.Value > 0) cfg.AdhocPort = adhocPort.Value;
-            if (webPort.HasValue && webPort.Value > 0) cfg.WebPort = webPort.Value;
+            if (webPort.HasValue && webPort.Value > 0) cfg.PublicPort = webPort.Value;
+            if (adminPort.HasValue && adminPort.Value > 0) cfg.AdminPort = adminPort.Value;
             cfg.Normalize();
+            cfg.EnsureSecrets();
 
             Log.Configure(cfg);
 
@@ -79,12 +83,15 @@ namespace Dpt.AdHoc
             _app.State = new ServerState(cfg);
 
             _app.Adhoc = new AdhocServer(_app);
-            _app.Web = new WebServer(_app);
+            _app.WebPublic = new WebServer(_app, WebRole.Public);
+            _app.WebAdmin = new WebServer(_app, WebRole.Admin);
 
             Log.Info("APP", "starting " + _app.Name + " v" + _app.Version +
                             " (CLR " + Environment.Version + ", " + Environment.OSVersion.VersionString + ")");
             Log.Info("APP", "working directory: " + Environment.CurrentDirectory);
-            Log.Info("APP", "adhoc port(s): " + cfg.AdhocPortList() + " | web port: " + cfg.WebPort.ToString(CultureInfo.InvariantCulture));
+            Log.Info("APP", "adhoc port(s): " + cfg.AdhocPortList() +
+                            " | public web: " + cfg.PublicPort.ToString(CultureInfo.InvariantCulture) +
+                            " | admin web: " + cfg.AdminPort.ToString(CultureInfo.InvariantCulture));
 
             if (!_app.Adhoc.Start())
             {
@@ -94,23 +101,27 @@ namespace Dpt.AdHoc
                 return _exitCode;
             }
 
-            if (!_app.Web.Start())
-            {
-                Log.Error("APP", "web ui could not start; protocol server keeps running. " +
-                                 "Try running as administrator or: netsh http add urlacl url=http://+:" + cfg.WebPort + "/ user=Everyone");
-            }
+            if (!_app.WebPublic.Start())
+                Log.Error("APP", "public web board could not start; the protocol server keeps running");
+
+            if (!_app.WebAdmin.Start())
+                Log.Error("APP", "admin web board could not start; the protocol server keeps running");
 
             _supervisor = new AppSupervisor(_app);
             _supervisor.Start();
 
-            Log.Info("APP", "ready. adhoc=" + _app.Adhoc.Port + " web=" + _app.Web.Port +
-                            " webRoot=" + _app.Web.Root);
-            Log.Info("APP", "open http://localhost:" + _app.Web.Port + "/ in a browser");
+            Log.Info("APP", "ready. adhoc=" + _app.Adhoc.Port +
+                            " public=" + _app.WebPublic.Port + " admin=" + _app.WebAdmin.Port +
+                            " webRoot=" + _app.WebPublic.Root);
+            Log.Info("APP", "public board: " + _app.WebPublic.BaseUrl);
+            Log.Info("APP", "admin board : " + _app.WebAdmin.BaseUrl + "  (token: config.ini web.adminToken)");
 
             if (!headless)
             {
-                _ui = new ConsoleUi(_app, RequestShutdown);
-                _ui.Start();
+                ConsoleUi ui = new ConsoleUi(_app, RequestShutdown);
+                _ui = ui;
+                ui.Start();
+                PrintAdminHint(cfg);
             }
             else
             {
@@ -131,9 +142,10 @@ namespace Dpt.AdHoc
 
         private static void PrintUsage()
         {
-            Console.WriteLine("DPT.Agent AdHoc Server");
+            Console.WriteLine("DPT.PSP AdHoc Server");
             Console.WriteLine("  --adhoc-port N   override server.adhocPort");
-            Console.WriteLine("  --web-port N     override web.port");
+            Console.WriteLine("  --web-port N     override web.publicPort");
+            Console.WriteLine("  --admin-port N   override web.adminPort");
             Console.WriteLine("  --level X        Error|Warn|Info|Debug|Verbose");
             Console.WriteLine("  --headless       no interactive console (Ctrl+C to stop)");
             Console.WriteLine("  --help           this text");
@@ -151,9 +163,9 @@ namespace Dpt.AdHoc
                 Console.WriteLine(" | |_| |  __/ | |  / ___ \\ (_| |   <| |_| | | | (_| | |");
                 Console.WriteLine(" |____/|_|    |_| /_/   \\_\\__,_|_|\\_\\\\__|_| |_|\\__,_|_|");
                 Console.ResetColor();
-                Console.WriteLine("  DPT.Agent AdHoc Server - PRO Online / PPSSPP compatible");
-                Console.WriteLine("  adhoc " + cfg.AdhocPort + "  |  web " + cfg.WebPort + "  |  log level " + cfg.LogLevel +
-                                  "  |  .NET 4.0 / XP ready");
+                Console.WriteLine("  DPT.PSP AdHoc Server - PRO Online / PPSSPP compatible");
+                Console.WriteLine("  adhoc " + cfg.AdhocPort + "  |  public " + cfg.PublicPort + "  |  admin " + cfg.AdminPort +
+                                  "  |  log level " + cfg.LogLevel + "  |  .NET 4.0 / XP ready");
                 Console.WriteLine();
             }
             catch { }
@@ -162,6 +174,25 @@ namespace Dpt.AdHoc
         private static void RequestShutdown()
         {
             try { StopEvent.Set(); } catch { }
+        }
+
+        /// <summary>Prints the admin URL + token to this console only (never to the log file).</summary>
+        private static void PrintAdminHint(Config cfg)
+        {
+            try
+            {
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("  ADMIN BOARD (LAN only):  " + _app.WebAdmin.BaseUrl);
+                Console.WriteLine("  admin token:             " + cfg.AdminToken);
+                Console.ResetColor();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("  token lives in config.ini (web.adminToken); the browser derives a key");
+                Console.WriteLine("  from it (PBKDF2 + salt) and signs/encrypts every admin API call.");
+                Console.ResetColor();
+                Console.WriteLine();
+            }
+            catch { }
         }
 
         private static void OnCancelKey(object sender, ConsoleCancelEventArgs e)
@@ -198,7 +229,8 @@ namespace Dpt.AdHoc
             try { if (_supervisor != null) _supervisor.Stop(); } catch { }
             try { if (_ui != null) _ui.Stop(); } catch { }
 
-            try { if (_app.Web != null) _app.Web.Stop(); } catch (Exception ex) { Log.Warn("APP", "web stop: " + ex.Message); }
+            try { if (_app.WebPublic != null) _app.WebPublic.Stop(); } catch (Exception ex) { Log.Warn("APP", "public web stop: " + ex.Message); }
+            try { if (_app.WebAdmin != null) _app.WebAdmin.Stop(); } catch (Exception ex) { Log.Warn("APP", "admin web stop: " + ex.Message); }
             try { if (_app.Adhoc != null) _app.Adhoc.Stop(); } catch (Exception ex) { Log.Warn("APP", "adhoc stop: " + ex.Message); }
 
             Log.Info("APP", "goodbye");

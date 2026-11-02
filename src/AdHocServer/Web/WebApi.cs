@@ -7,10 +7,25 @@ using Dpt.AdHoc.Net;
 
 namespace Dpt.AdHoc.Web
 {
-    /// <summary>All JSON/XML endpoints of the web UI.</summary>
+    /// <summary>
+    /// HTTP API. Two faces:
+    ///   Public - read only, redacted (no MAC/IP/session ids/logs/moderation), safe to expose.
+    ///   Admin  - everything, protected by signed + sealed requests (see ApiCrypto).
+    /// </summary>
     public static class WebApi
     {
-        public static bool Handle(WebServer web, HttpRequest req, HttpResponse resp)
+        private static readonly string[] PublicEventTypes =
+            new string[] { "join", "leave", "game.new", "group.join", "group.leave" };
+
+        public static bool Handle(WebServer web, HttpRequest req, HttpResponse resp, string clientIp)
+        {
+            if (web.Role == WebRole.Public) return HandlePublic(web, req, resp);
+            return HandleAdmin(web, req, resp);
+        }
+
+        // ------------------------------------------------------------- public
+
+        private static bool HandlePublic(WebServer web, HttpRequest req, HttpResponse resp)
         {
             string p = (req.Path ?? "").ToLowerInvariant();
             string method = req.Method ?? "GET";
@@ -19,36 +34,98 @@ namespace Dpt.AdHoc.Web
             switch (p)
             {
                 case "/status.xml":
-                    if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    web.SendXml(req, resp, 200, BuildStatusXml(web));
+                    if (!isGet) return false;
+                    web.SendXml(req, resp, 200, BuildStatusXml(web, true));
                     return true;
 
                 case "/api/health":
-                    web.SendJson(req, resp, 200, "{\"ok\":true,\"name\":" + Json.Quote(web.App.Name) +
-                                                 ",\"version\":" + Json.Quote(web.App.Version) +
-                                                 ",\"uptimeSec\":" + Json.Number((long)web.App.Uptime.TotalSeconds) + "}");
+                    web.SendJson(req, resp, 200, BuildHealth(web));
+                    return true;
+
+                case "/api/status":
+                    if (!isGet) return false;
+                    web.SendJson(req, resp, 200, BuildStatus(web, true));
+                    return true;
+
+                case "/api/games":
+                    if (!isGet) return false;
+                    web.SendJson(req, resp, 200, BuildGames(web, true));
+                    return true;
+
+                case "/api/history":
+                    if (!isGet) return false;
+                    web.SendJson(req, resp, 200, BuildHistory(web, req, true));
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        // -------------------------------------------------------------- admin
+
+        private static bool HandleAdmin(WebServer web, HttpRequest req, HttpResponse resp)
+        {
+            string p = (req.Path ?? "").ToLowerInvariant();
+            string method = req.Method ?? "GET";
+            bool isGet = method == "GET" || method == "HEAD";
+
+            if (p == "/api/health")
+            {
+                web.SendJson(req, resp, 200, BuildHealth(web));
+                return true;
+            }
+
+            if (p == "/api/auth")
+            {
+                if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                web.SendJson(req, resp, 200, BuildAuthInfo(web));
+                return true;
+            }
+
+            AuthContext auth = web.Authenticate(req);
+            if (!auth.Ok)
+            {
+                string body = "{\"ok\":false,\"error\":" + Json.Quote(auth.Error) +
+                              ",\"auth\":true,\"code\":\"" + (auth.Blocked ? "blocked" : "signature") + "\"}";
+                web.SendJson(req, resp, auth.Blocked ? 429 : 401, body);
+                return true;
+            }
+
+            bool handled = DispatchAdmin(web, req, resp, p, method, isGet);
+            if (handled) web.SealResponse(auth, resp);
+            return handled;
+        }
+
+        private static bool DispatchAdmin(WebServer web, HttpRequest req, HttpResponse resp, string p,
+                                          string method, bool isGet)
+        {
+            switch (p)
+            {
+                case "/status.xml":
+                    if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    web.SendXml(req, resp, 200, BuildStatusXml(web, false));
                     return true;
 
                 case "/api/status":
                     if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    web.SendJson(req, resp, 200, BuildStatus(web));
+                    web.SendJson(req, resp, 200, BuildStatus(web, false));
                     return true;
 
                 case "/api/games":
-                    if (isGet) { web.SendJson(req, resp, 200, BuildGames(web)); return true; }
+                    if (isGet) { web.SendJson(req, resp, 200, BuildGames(web, false)); return true; }
                     if (method == "POST") { HandleGameSave(web, req, resp); return true; }
                     web.SendJson(req, resp, 405, Err("method not allowed"));
                     return true;
 
                 case "/api/history":
                     if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    web.SendJson(req, resp, 200, BuildHistory(web, req));
+                    web.SendJson(req, resp, 200, BuildHistory(web, req, false));
                     return true;
 
                 case "/api/logs":
                     if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
                     if (!web.Config.ExposeLogs) { web.SendJson(req, resp, 403, Err("logs are disabled by config")); return true; }
-                    if (!RequireAdmin(web, req, resp)) return true;
                     web.SendJson(req, resp, 200, BuildLogs(web, req));
                     return true;
 
@@ -59,7 +136,6 @@ namespace Dpt.AdHoc.Web
 
                 case "/api/bans/clear":
                     if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    if (!RequireAdmin(web, req, resp)) return true;
                     {
                         int n = web.App.Adhoc == null ? 0 : web.App.Adhoc.ClearBans();
                         web.SendJson(req, resp, 200, "{\"ok\":true,\"cleared\":" + Json.Number(n) + "}");
@@ -68,19 +144,16 @@ namespace Dpt.AdHoc.Web
 
                 case "/api/kick":
                     if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    if (!RequireAdmin(web, req, resp)) return true;
                     HandleKick(web, req, resp);
                     return true;
 
                 case "/api/chat":
                     if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    if (!RequireAdmin(web, req, resp)) return true;
                     HandleChat(web, req, resp);
                     return true;
 
                 case "/api/reload":
                     if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    if (!RequireAdmin(web, req, resp)) return true;
                     web.App.Db.Reload();
                     RefreshLiveGameNames(web);
                     web.SendJson(req, resp, 200, "{\"ok\":true,\"games\":" + Json.Number(web.App.Db.Count) + "}");
@@ -96,20 +169,38 @@ namespace Dpt.AdHoc.Web
             return "{\"ok\":false,\"error\":" + Json.Quote(message) + "}";
         }
 
-        private static bool RequireAdmin(WebServer web, HttpRequest req, HttpResponse resp)
+        // --------------------------------------------------------------- info
+
+        private static string BuildHealth(WebServer web)
         {
-            string token = web.Config.AdminToken;
-            if (string.IsNullOrEmpty(token)) return true;
-            string given = req.Header("X-Admin-Token");
-            if (string.IsNullOrEmpty(given)) given = req.QueryString("token");
-            if (string.Equals(given, token, StringComparison.Ordinal)) return true;
-            web.SendJson(req, resp, 401, Err("admin token required (X-Admin-Token header)"));
-            return false;
+            StringBuilder sb = new StringBuilder(160);
+            sb.Append("{\"ok\":true,\"name\":").Append(Json.Quote(web.App.Name))
+              .Append(",\"version\":").Append(Json.Quote(web.App.Version))
+              .Append(",\"role\":").Append(Json.Quote(web.RoleName))
+              .Append(",\"uptimeSec\":").Append(Json.Number((long)web.App.Uptime.TotalSeconds))
+              .Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildAuthInfo(WebServer web)
+        {
+            JsonBuilder jb = new JsonBuilder();
+            jb.BeginObject();
+            jb.Prop("ok", true);
+            jb.Prop("scheme", ApiCrypto.Scheme);
+            jb.Prop("salt", web.Config.AdminSalt);
+            jb.Prop("iterations", web.Config.AdminKdfIterations);
+            jb.Prop("encrypt", web.Config.AdminEncrypt);
+            jb.Prop("role", "admin");
+            jb.Prop("skewSec", ApiCrypto.MaxClockSkewSeconds);
+            jb.Prop("ts", (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds);
+            jb.EndObject();
+            return jb.ToString();
         }
 
         // ------------------------------------------------------------- status
 
-        private static string BuildStatus(WebServer web)
+        private static string BuildStatus(WebServer web, bool redact)
         {
             ServerApp app = web.App;
             Config cfg = web.Config;
@@ -120,6 +211,7 @@ namespace Dpt.AdHoc.Web
             jb.BeginObject();
             jb.Prop("ok", true);
             jb.Prop("nowUtc", Util.Iso(DateTime.UtcNow));
+            jb.Prop("role", redact ? "public" : "admin");
 
             jb.Name("server").BeginObject();
             jb.Prop("name", app.Name);
@@ -129,14 +221,18 @@ namespace Dpt.AdHoc.Web
             jb.Prop("uptimeSec", (long)app.Uptime.TotalSeconds);
             jb.Prop("adhocPort", app.Adhoc != null ? app.Adhoc.Port : 0);
             jb.Prop("webPort", web.Port);
-            jb.Prop("webUrl", web.BaseUrl);
-            jb.Prop("host", Environment.MachineName);
-            jb.Prop("os", Environment.OSVersion.VersionString);
-            jb.Prop("clr", Environment.Version.ToString());
-            jb.Prop("cpus", Environment.ProcessorCount);
-            jb.Prop("memoryMB", Math.Round(app.WorkingSetBytes / 1048576.0, 1));
+            jb.Prop("role", web.RoleName);
             jb.Prop("protocol", "PRO Online / PPSSPP adhocctl");
-            jb.Prop("logLevel", Log.MinLevel.ToString());
+            if (!redact)
+            {
+                jb.Prop("webUrl", web.BaseUrl);
+                jb.Prop("host", Environment.MachineName);
+                jb.Prop("os", Environment.OSVersion.VersionString);
+                jb.Prop("clr", Environment.Version.ToString());
+                jb.Prop("cpus", Environment.ProcessorCount);
+                jb.Prop("memoryMB", Math.Round(app.WorkingSetBytes / 1048576.0, 1));
+                jb.Prop("logLevel", Log.MinLevel.ToString());
+            }
             jb.EndObject();
 
             long seq;
@@ -159,13 +255,13 @@ namespace Dpt.AdHoc.Web
                     GameEntry g = games[gi];
                     jb.BeginObject();
                     jb.Prop("id", g.Id);
-                    jb.Prop("rawId", g.RawId);
+                    if (!redact) jb.Prop("rawId", g.RawId);
                     jb.Prop("name", db.DisplayName(g.Id));
                     jb.Prop("known", db.HasTitle(g.Id));
                     jb.Prop("players", g.Sessions.Count);
                     jb.Prop("peak", g.PeakPlayers);
                     jb.Prop("totalPlayers", g.TotalPlayers);
-                    jb.Prop("createdUtc", Util.Iso(g.CreatedUtc));
+                    if (!redact) jb.Prop("createdUtc", Util.Iso(g.CreatedUtc));
                     jb.Prop("lastActivityUtc", Util.Iso(g.LastActivityUtc));
 
                     jb.Name("groups").BeginArray();
@@ -175,13 +271,11 @@ namespace Dpt.AdHoc.Web
                         jb.BeginObject();
                         jb.Prop("name", group.Name);
                         jb.Prop("players", group.Sessions.Count);
-                        jb.Prop("host", group.Founder != null ? group.Founder.MacText : "");
-                        jb.Prop("createdUtc", Util.Iso(group.CreatedUtc));
+                        if (!redact) jb.Prop("host", group.Founder != null ? group.Founder.MacText : "");
+                        if (!redact) jb.Prop("createdUtc", Util.Iso(group.CreatedUtc));
                         jb.Name("members").BeginArray();
                         for (int si = 0; si < group.Sessions.Count; si++)
-                        {
-                            WritePlayer(jb, group.Sessions[si], group.Founder == group.Sessions[si]);
-                        }
+                            WritePlayer(jb, group.Sessions[si], group.Founder == group.Sessions[si], redact);
                         jb.EndArray();
                         jb.EndObject();
                     }
@@ -192,7 +286,7 @@ namespace Dpt.AdHoc.Web
                     {
                         ClientSession s = g.Sessions[si];
                         if (s.Group != null) continue;
-                        WritePlayer(jb, s, false);
+                        WritePlayer(jb, s, false, redact);
                     }
                     jb.EndArray();
                     jb.EndObject();
@@ -230,18 +324,21 @@ namespace Dpt.AdHoc.Web
             jb.Prop("games", totalGames);
             jb.Prop("groups", totalGroups);
             jb.Prop("connections", totalConnections);
-            jb.Prop("logins", totalLogins);
             jb.Prop("chats", chats);
             jb.Prop("timeouts", timeouts);
-            jb.Prop("protocolErrors", protoErrors);
-            jb.Prop("kicks", kicks);
-            jb.Prop("bans", bans);
-            jb.Prop("duplicateMacs", dups);
-            jb.Prop("history", historyCount);
             jb.Prop("events", eventsCount);
-            jb.Prop("bytesIn", bytesIn);
-            jb.Prop("bytesOut", bytesOut);
-            jb.Prop("webRequests", web.Requests);
+            if (!redact)
+            {
+                jb.Prop("logins", totalLogins);
+                jb.Prop("protocolErrors", protoErrors);
+                jb.Prop("kicks", kicks);
+                jb.Prop("bans", bans);
+                jb.Prop("duplicateMacs", dups);
+                jb.Prop("history", historyCount);
+                jb.Prop("bytesIn", bytesIn);
+                jb.Prop("bytesOut", bytesOut);
+                jb.Prop("webRequests", web.Requests);
+            }
             jb.Prop("eventSeq", seq);
             jb.EndObject();
 
@@ -256,8 +353,11 @@ namespace Dpt.AdHoc.Web
                     jb.Prop("name", h.Name);
                     jb.Prop("gameId", h.GameId);
                     jb.Prop("gameName", h.GameName);
-                    jb.Prop("mac", h.Mac);
-                    jb.Prop("ip", h.Ip);
+                    if (!redact)
+                    {
+                        jb.Prop("mac", h.Mac);
+                        jb.Prop("ip", h.Ip);
+                    }
                     jb.Prop("group", h.Group);
                     jb.Prop("connectUtc", Util.Iso(h.ConnectUtc));
                     jb.Prop("disconnectUtc", Util.Iso(h.DisconnectUtc));
@@ -275,11 +375,12 @@ namespace Dpt.AdHoc.Web
                 for (int i = from; i < st.Events.Count; i++)
                 {
                     ServerEvent e = st.Events[i];
+                    if (redact && Array.IndexOf(PublicEventTypes, e.Type) < 0) continue;
                     jb.BeginObject();
                     jb.Prop("seq", e.Seq);
                     jb.Prop("timeUtc", Util.Iso(e.Utc));
                     jb.Prop("type", e.Type);
-                    jb.Prop("gameId", e.GameId);
+                    if (!redact) jb.Prop("gameId", e.GameId);
                     jb.Prop("gameName", e.GameName);
                     jb.Prop("player", e.Player);
                     jb.Prop("text", e.Text);
@@ -302,36 +403,46 @@ namespace Dpt.AdHoc.Web
             jb.Prop("refreshMs", cfg.RefreshMs);
             jb.Prop("timeoutSec", cfg.UserTimeoutSec);
             jb.Prop("maxUsers", cfg.MaxUsers);
-            jb.Prop("exposeLogs", cfg.ExposeLogs);
-            jb.Prop("adminRequired", !string.IsNullOrEmpty(cfg.AdminToken));
-            jb.Prop("historySize", cfg.HistorySize);
-            jb.Prop("eventSize", cfg.EventSize);
             jb.Prop("dbGames", db.Count);
             jb.Prop("dbCrosslinks", db.CrosslinkCount);
+            jb.Prop("role", web.RoleName);
+            jb.Prop("auth", web.IsAdmin);
+            if (!redact)
+            {
+                jb.Prop("exposeLogs", cfg.ExposeLogs);
+                jb.Prop("historySize", cfg.HistorySize);
+                jb.Prop("eventSize", cfg.EventSize);
+            }
             jb.EndObject();
 
             jb.EndObject();
             return jb.ToString();
         }
 
-        private static void WritePlayer(JsonBuilder jb, ClientSession s, bool isHost)
+        private static void WritePlayer(JsonBuilder jb, ClientSession s, bool isHost, bool redact)
         {
             jb.BeginObject();
-            jb.Prop("id", s.Id);
+            if (!redact) jb.Prop("id", s.Id);
             jb.Prop("name", s.Nickname);
-            jb.Prop("mac", s.MacText);
-            jb.Prop("ip", s.RemoteIp);
+            if (!redact)
+            {
+                jb.Prop("mac", s.MacText);
+                jb.Prop("ip", s.RemoteIp);
+            }
             jb.Prop("connectUtc", Util.Iso(s.ConnectUtc));
             jb.Prop("connectedSec", (long)s.ConnectedFor.TotalSeconds);
-            jb.Prop("idleSec", (long)s.IdleFor.TotalSeconds);
-            jb.Prop("bytesIn", s.BytesIn);
-            jb.Prop("bytesOut", s.BytesOut);
-            jb.Prop("pings", s.Pings);
+            if (!redact)
+            {
+                jb.Prop("idleSec", (long)s.IdleFor.TotalSeconds);
+                jb.Prop("bytesIn", s.BytesIn);
+                jb.Prop("bytesOut", s.BytesOut);
+                jb.Prop("pings", s.Pings);
+            }
             jb.Prop("isHost", isHost);
             jb.EndObject();
         }
 
-        private static string BuildStatusXml(WebServer web)
+        private static string BuildStatusXml(WebServer web, bool redact)
         {
             ServerState st = web.App.State;
             GameDatabase db = web.App.Db;
@@ -378,7 +489,7 @@ namespace Dpt.AdHoc.Web
 
         // -------------------------------------------------------------- games
 
-        private static string BuildGames(WebServer web)
+        private static string BuildGames(WebServer web, bool redact)
         {
             GameDatabase db = web.App.Db;
             JsonBuilder jb = new JsonBuilder();
@@ -406,13 +517,13 @@ namespace Dpt.AdHoc.Web
                     if (!db.HasTitle(kv.Key)) jb.Str(kv.Key);
             }
             jb.EndArray();
+            jb.Prop("role", web.RoleName);
             jb.EndObject();
             return jb.ToString();
         }
 
         private static void HandleGameSave(WebServer web, HttpRequest req, HttpResponse resp)
         {
-            if (!RequireAdmin(web, req, resp)) return;
             string body = ReadBody(web, req, resp, 64 * 1024);
             if (body == null) return;
 
@@ -464,7 +575,7 @@ namespace Dpt.AdHoc.Web
 
         // ------------------------------------------------------------ history
 
-        private static string BuildHistory(WebServer web, HttpRequest req)
+        private static string BuildHistory(WebServer web, HttpRequest req, bool redact)
         {
             int limit = 100;
             string l = req.QueryString("limit");
@@ -490,15 +601,18 @@ namespace Dpt.AdHoc.Web
                     jb.Prop("name", e.Name);
                     jb.Prop("gameId", e.GameId);
                     jb.Prop("gameName", e.GameName);
-                    jb.Prop("mac", e.Mac);
-                    jb.Prop("ip", e.Ip);
                     jb.Prop("group", e.Group);
                     jb.Prop("connectUtc", Util.Iso(e.ConnectUtc));
                     jb.Prop("disconnectUtc", Util.Iso(e.DisconnectUtc));
                     jb.Prop("durationSec", e.DurationSec);
                     jb.Prop("reason", e.Reason);
-                    jb.Prop("bytesIn", e.BytesIn);
-                    jb.Prop("bytesOut", e.BytesOut);
+                    if (!redact)
+                    {
+                        jb.Prop("mac", e.Mac);
+                        jb.Prop("ip", e.Ip);
+                        jb.Prop("bytesIn", e.BytesIn);
+                        jb.Prop("bytesOut", e.BytesOut);
+                    }
                     jb.EndObject();
                 }
             }

@@ -35,14 +35,35 @@ namespace Dpt.AdHoc.Core
         public string ShutdownMessage = "ADHOC SERVER IS SHUTTING DOWN!";
 
         // ---- web ----
-        public int WebPort = 8080;
-        public int[] WebPortFallbacks = new int[] { 8081, 8082, 8083, 8084, 8085 };
-        public string WebBindAddress = "0.0.0.0";
+        // Public board: this is the port you expose to the internet.
+        public int PublicPort = 44501;
+        public int[] PublicPortFallbacks = new int[] { 44503, 44505 };
+        public string PublicBind = "0.0.0.0";
+
+        // Admin board: keep it on the LAN, it exposes moderation + protocol logs.
+        public int AdminPort = 44502;
+        public int[] AdminPortFallbacks = new int[] { 44504, 44506 };
+        public string AdminBind = "0.0.0.0";
+        public bool AdminPrivateOnly = true;
+
+        // Reverse proxy (NGinx Proxy Manager, nginx, Cloudflare tunnel, NAT hairpin).
+        public string PublicBasePath = "";
+        public string AdminBasePath = "";
+        public bool TrustProxyHeaders = true;
+        public string TrustedProxies =
+            "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16";
+
+        // Admin API protection: token -> PBKDF2(salt) -> HMAC signatures + sealed bodies.
+        public string AdminToken = "";
+        public string AdminSalt = "";
+        public int AdminKdfIterations = 12000;
+        public bool AdminEncrypt = true;
+        public bool AdminAllowQueryToken = false;
+
         public bool WebCompress = true;
         public int WebRequestsPerMinute = 600;
         public int WebMaxConcurrent = 32;
         public bool ExposeLogs = true;
-        public string AdminToken = "";
         public string DefaultTheme = "light";
         public bool DefaultSound = true;
         public int RefreshMs = 2000;
@@ -85,7 +106,7 @@ namespace Dpt.AdHoc.Core
                         if (int.TryParse(File.ReadAllText(legacy).Trim(), out p) && p > 0 && p <= 65535)
                         {
                             legacyWebPort = p;
-                            c.WebPort = p;
+                            c.PublicPort = p;
                         }
                     }
                     catch { /* ignore broken legacy file */ }
@@ -118,17 +139,27 @@ namespace Dpt.AdHoc.Core
             c.RequireValidProductCode = GetBool(kv, "server.requireValidProductCode", c.RequireValidProductCode);
             c.ShutdownMessage = GetStr(kv, "server.shutdownMessage", c.ShutdownMessage);
 
-            c.WebPort = GetInt(kv, "web.port", c.WebPort);
-            c.WebPortFallbacks = GetPortList(kv, "web.portFallbacks", c.WebPortFallbacks);
-            c.WebBindAddress = GetStr(kv, "web.bindAddress", GetStr(kv, "web.prefix", c.WebBindAddress));
-            if (c.WebBindAddress.IndexOf("://", StringComparison.Ordinal) >= 0 ||
-                c.WebBindAddress.IndexOf('/') >= 0 || c.WebBindAddress == "+" || c.WebBindAddress == "*")
-                c.WebBindAddress = "0.0.0.0";
+            c.PublicPort = GetInt(kv, "web.publicPort", GetInt(kv, "web.port", c.PublicPort));
+            c.PublicPortFallbacks = GetPortList(kv, "web.publicPortFallbacks",
+                GetPortList(kv, "web.portFallbacks", c.PublicPortFallbacks));
+            c.PublicBind = NormalizeBind(GetStr(kv, "web.publicBind", GetStr(kv, "web.bindAddress", c.PublicBind)));
+            c.AdminPort = GetInt(kv, "web.adminPort", c.AdminPort);
+            c.AdminPortFallbacks = GetPortList(kv, "web.adminPortFallbacks", c.AdminPortFallbacks);
+            c.AdminBind = NormalizeBind(GetStr(kv, "web.adminBind", c.AdminBind));
+            c.AdminPrivateOnly = GetBool(kv, "web.adminPrivateOnly", c.AdminPrivateOnly);
+            c.PublicBasePath = NormalizeBasePath(GetStr(kv, "web.publicBasePath", c.PublicBasePath));
+            c.AdminBasePath = NormalizeBasePath(GetStr(kv, "web.adminBasePath", c.AdminBasePath));
+            c.TrustProxyHeaders = GetBool(kv, "web.trustProxyHeaders", c.TrustProxyHeaders);
+            c.TrustedProxies = GetStr(kv, "web.trustedProxies", c.TrustedProxies);
+            c.AdminKdfIterations = GetInt(kv, "web.adminKdfIterations", c.AdminKdfIterations);
+            c.AdminEncrypt = GetBool(kv, "web.adminEncrypt", c.AdminEncrypt);
+            c.AdminAllowQueryToken = GetBool(kv, "web.adminAllowQueryToken", c.AdminAllowQueryToken);
             c.WebCompress = GetBool(kv, "web.compress", c.WebCompress);
             c.WebRequestsPerMinute = GetInt(kv, "web.requestsPerMinute", c.WebRequestsPerMinute);
             c.WebMaxConcurrent = GetInt(kv, "web.maxConcurrentRequests", c.WebMaxConcurrent);
             c.ExposeLogs = GetBool(kv, "web.exposeLogs", c.ExposeLogs);
             c.AdminToken = GetStr(kv, "web.adminToken", c.AdminToken);
+            c.AdminSalt = GetStr(kv, "web.adminSalt", c.AdminSalt);
             c.DefaultTheme = GetStr(kv, "web.defaultTheme", c.DefaultTheme);
             c.DefaultSound = GetBool(kv, "web.defaultSound", c.DefaultSound);
             c.RefreshMs = GetInt(kv, "web.refreshMs", c.RefreshMs);
@@ -160,7 +191,13 @@ namespace Dpt.AdHoc.Core
             if (!Path.IsPathRooted(WebRoot)) WebRoot = Path.Combine(BaseDir, WebRoot);
 
             AdhocPort = Clamp(AdhocPort, 1, 65535);
-            WebPort = Clamp(WebPort, 1, 65535);
+            PublicPort = Clamp(PublicPort, 1, 65535);
+            AdminPort = Clamp(AdminPort, 1, 65535);
+            if (AdminPort == PublicPort) AdminPort = PublicPort == 65535 ? 65534 : PublicPort + 1;
+            AdminKdfIterations = Clamp(AdminKdfIterations, 1000, 200000);
+            if (string.IsNullOrEmpty(AdminSalt) || ApiCrypto.FromHex(AdminSalt) == null) AdminSalt = "";
+            if (string.IsNullOrEmpty(PublicBind)) PublicBind = "0.0.0.0";
+            if (string.IsNullOrEmpty(AdminBind)) AdminBind = "0.0.0.0";
             ListenBacklog = Clamp(ListenBacklog, 8, 4096);
             MaxUsers = Clamp(MaxUsers, 1, 4096);
             MaxUsersPerIp = Clamp(MaxUsersPerIp, 1, 4096);
@@ -195,6 +232,166 @@ namespace Dpt.AdHoc.Core
                 }
             }
             return sb.ToString();
+        }
+
+        private static string NormalizeBind(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "0.0.0.0";
+            string v = value.Trim();
+            if (v == "*" || v == "+" || v == "any" || v == "all") return "0.0.0.0";
+            if (v.IndexOf("://", StringComparison.Ordinal) >= 0 || v.IndexOf('/') >= 0) return "0.0.0.0";
+            return v;
+        }
+
+        /// <summary>"/adhoc/" -> "/adhoc"; "" stays "". Used when the board lives behind a proxy sub-path.</summary>
+        public static string NormalizeBasePath(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            string v = value.Trim();
+            if (v.Length == 0 || v == "/") return "";
+            if (!v.StartsWith("/", StringComparison.Ordinal)) v = "/" + v;
+            while (v.EndsWith("/", StringComparison.Ordinal)) v = v.Substring(0, v.Length - 1);
+            return v;
+        }
+
+        /// <summary>
+        /// Makes sure the admin board has a token and a per-install salt.
+        /// Generated values are written back into config.ini so they survive restarts.
+        /// </summary>
+        public bool EnsureSecrets()
+        {
+            bool changed = false;
+
+            if (string.IsNullOrEmpty(AdminSalt) || ApiCrypto.FromHex(AdminSalt) == null)
+            {
+                AdminSalt = ApiCrypto.RandomHex(ApiCrypto.SaltBytes);
+                changed = true;
+            }
+
+            if (string.IsNullOrEmpty(AdminToken))
+            {
+                AdminToken = ApiCrypto.RandomHex(24); // 48 hex chars, ~192 bit
+                changed = true;
+            }
+
+            if (changed)
+            {
+                try
+                {
+                    UpdateIniKeys(new string[] { "adminToken", "adminSalt" });
+                    Log.Warn("CONFIG", "admin credentials generated and saved to " + ConfigPath);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("CONFIG", "cannot persist admin credentials to config.ini: " + ex.Message);
+                }
+            }
+            return changed;
+        }
+
+        /// <summary>Rewrites selected [web] keys in config.ini, keeping everything else intact.</summary>
+        public void UpdateIniKeys(string[] keys)
+        {
+            bool hasBom;
+            string text = ReadTextPreservingBom(ConfigPath, out hasBom);
+            string[] lines = text.Replace("\r\n", "\n").Split('\n');
+            List<string> output = new List<string>();
+            bool[] seen = new bool[keys.Length];
+
+            string section = "";
+            bool inWeb = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                string trimmed = line.Trim();
+
+                if (trimmed.StartsWith("[", StringComparison.Ordinal))
+                {
+                    if (inWeb) AppendMissingKeys(output, keys, seen);
+                    int end = trimmed.IndexOf(']');
+                    section = end > 1 ? trimmed.Substring(1, end - 1).Trim() : "";
+                    inWeb = section.Equals("web", StringComparison.OrdinalIgnoreCase);
+                    output.Add(line);
+                    continue;
+                }
+
+                if (inWeb)
+                {
+                    int eq = trimmed.IndexOf('=');
+                    if (eq > 0)
+                    {
+                        string name = trimmed.Substring(0, eq).Trim();
+                        int idx = IndexOfKey(keys, name);
+                        if (idx >= 0)
+                        {
+                            if (!seen[idx])
+                            {
+                                output.Add(KeyLine(keys[idx]));
+                                seen[idx] = true;
+                            }
+                            continue; // drop duplicated/stale lines
+                        }
+                    }
+                }
+                output.Add(line);
+            }
+
+            if (inWeb) AppendMissingKeys(output, keys, seen);
+            else if (!AllSeen(seen))
+            {
+                output.Add("");
+                output.Add("[web]");
+                for (int k = 0; k < keys.Length; k++)
+                    if (!seen[k]) output.Add(KeyLine(keys[k]));
+            }
+
+            string result = string.Join(Environment.NewLine, output.ToArray());
+            WriteTextPreservingBom(ConfigPath, result, hasBom);
+        }
+
+        private static int IndexOfKey(string[] keys, string name)
+        {
+            for (int i = 0; i < keys.Length; i++)
+                if (string.Equals(keys[i], name, StringComparison.OrdinalIgnoreCase)) return i;
+            return -1;
+        }
+
+        private static bool AllSeen(bool[] seen)
+        {
+            for (int i = 0; i < seen.Length; i++) if (!seen[i]) return false;
+            return true;
+        }
+
+        private void AppendMissingKeys(List<string> output, string[] keys, bool[] seen)
+        {
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (seen[i]) continue;
+                output.Add(KeyLine(keys[i]));
+                seen[i] = true;
+            }
+        }
+
+        private string KeyLine(string key)
+        {
+            if (string.Equals(key, "adminToken", StringComparison.OrdinalIgnoreCase)) return "adminToken=" + AdminToken;
+            if (string.Equals(key, "adminSalt", StringComparison.OrdinalIgnoreCase)) return "adminSalt=" + AdminSalt;
+            return key + "=";
+        }
+
+        private static string ReadTextPreservingBom(string path, out bool hasBom)
+        {
+            hasBom = false;
+            if (!File.Exists(path)) return "";
+            byte[] bytes = File.ReadAllBytes(path);
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) hasBom = true;
+            return hasBom ? new UTF8Encoding(true).GetString(bytes, 3, bytes.Length - 3) : new UTF8Encoding(false).GetString(bytes);
+        }
+
+        private static void WriteTextPreservingBom(string path, string text, bool bom)
+        {
+            File.WriteAllText(path, text, new UTF8Encoding(bom));
         }
 
         public static LogLevel ParseLevel(string s)
@@ -247,16 +444,43 @@ namespace Dpt.AdHoc.Core
             sb.AppendLine("shutdownMessage=ADHOC SERVER IS SHUTTING DOWN!");
             sb.AppendLine();
             sb.AppendLine("[web]");
-            sb.AppendLine("port=8080");
-            sb.AppendLine("portFallbacks=" + JoinPorts(WebPortFallbacks));
-            sb.AppendLine("; Bind address: 0.0.0.0 = all interfaces, 127.0.0.1 = local only");
-            sb.AppendLine("bindAddress=0.0.0.0");
+            sb.AppendLine("; ---------- public board (expose this one to the internet) ----------");
+            sb.AppendLine("publicPort=" + PublicPort.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("publicPortFallbacks=" + JoinPorts(PublicPortFallbacks));
+            sb.AppendLine("; 0.0.0.0 = all interfaces, 127.0.0.1 = local only");
+            sb.AppendLine("publicBind=0.0.0.0");
+            sb.AppendLine();
+            sb.AppendLine("; ---------- admin board (keep it in the LAN) ----------");
+            sb.AppendLine("adminPort=" + AdminPort.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("adminPortFallbacks=" + JoinPorts(AdminPortFallbacks));
+            sb.AppendLine("adminBind=0.0.0.0");
+            sb.AppendLine("; Refuse admin connections from non private addresses (extra net for port forwards)");
+            sb.AppendLine("adminPrivateOnly=true");
+            sb.AppendLine();
+            sb.AppendLine("; ---------- reverse proxy (NGinx Proxy Manager, nginx, NAT hairpin) ----------");
+            sb.AppendLine("; Optional sub-path, e.g. /adhoc when the board is published as example.com/adhoc/");
+            sb.AppendLine("publicBasePath=");
+            sb.AppendLine("adminBasePath=");
+            sb.AppendLine("; Trust X-Forwarded-For / X-Real-IP, but only from the proxies listed below");
+            sb.AppendLine("trustProxyHeaders=true");
+            sb.AppendLine("trustedProxies=127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16");
+            sb.AppendLine();
+            sb.AppendLine("; ---------- admin API protection ----------");
+            sb.AppendLine("; Leave empty once, the server generates a strong token and saves it here.");
+            sb.AppendLine("; The browser never sends the token: it derives a key (PBKDF2) and signs requests.");
+            sb.AppendLine("adminToken=");
+            sb.AppendLine("; Random per-install salt, generated on first run.");
+            sb.AppendLine("adminSalt=");
+            sb.AppendLine("adminKdfIterations=12000");
+            sb.AppendLine("; Encrypt request/response bodies of the admin API (encrypt-then-MAC).");
+            sb.AppendLine("adminEncrypt=true");
+            sb.AppendLine("; Allow ?token= in URLs (less safe: leaks into history/logs). Keep false.");
+            sb.AppendLine("adminAllowQueryToken=false");
+            sb.AppendLine();
             sb.AppendLine("compress=true");
             sb.AppendLine("requestsPerMinute=600");
             sb.AppendLine("maxConcurrentRequests=32");
             sb.AppendLine("exposeLogs=true");
-            sb.AppendLine("; If set, write endpoints require header X-Admin-Token");
-            sb.AppendLine("adminToken=");
             sb.AppendLine("defaultTheme=light");
             sb.AppendLine("defaultSound=true");
             sb.AppendLine("refreshMs=2000");

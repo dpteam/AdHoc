@@ -6,34 +6,61 @@ using Dpt.AdHoc.Core;
 namespace Dpt.AdHoc
 {
     /// <summary>
-    /// Watchdog: keeps the two listeners alive and restarts them with exponential backoff.
-    /// This is the "dynamic fault tolerance" part - a dead accept loop never leaves the
-    /// process running as a zombie that silently eats connections.
+    /// Watchdog: keeps the adhoc listener and both web listeners alive.
+    /// A dead accept loop never leaves the process running as a zombie that silently
+    /// eats connections; restarts use exponential backoff.
     /// </summary>
     public sealed class AppSupervisor
     {
+        private sealed class Watched
+        {
+            public string Name;
+            public Func<bool> IsRunning;
+            public Func<bool> Restart;
+            public DateTime BackoffUntil = DateTime.MinValue;
+            public bool Fault;
+            public int Restarts;
+        }
+
         private readonly ServerApp _app;
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
         private Thread _thread;
-        private int _adhocRestarts;
-        private int _webRestarts;
-        private DateTime _adhocBackoffUntil = DateTime.MinValue;
-        private DateTime _webBackoffUntil = DateTime.MinValue;
-        private bool _adhocFault;
-        private bool _webFault;
+        private readonly Watched _adhoc;
+        private readonly Watched _publicWeb;
+        private readonly Watched _adminWeb;
 
         public AppSupervisor(ServerApp app)
         {
             _app = app;
+            _adhoc = new Watched
+            {
+                Name = "adhoc",
+                IsRunning = delegate { return app.Adhoc != null && app.Adhoc.IsRunning; },
+                Restart = delegate { return app.Adhoc != null && app.Adhoc.Restart(); }
+            };
+            _publicWeb = new Watched
+            {
+                Name = "web-public",
+                IsRunning = delegate { return app.WebPublic != null && app.WebPublic.IsRunning; },
+                Restart = delegate { return app.WebPublic != null && app.WebPublic.Restart(); }
+            };
+            _adminWeb = new Watched
+            {
+                Name = "web-admin",
+                IsRunning = delegate { return app.WebAdmin != null && app.WebAdmin.IsRunning; },
+                Restart = delegate { return app.WebAdmin != null && app.WebAdmin.Restart(); }
+            };
         }
 
-        public int AdhocRestarts { get { return _adhocRestarts; } }
-        public int WebRestarts { get { return _webRestarts; } }
+        public int AdhocRestarts { get { return _adhoc.Restarts; } }
+        public int PublicRestarts { get { return _publicWeb.Restarts; } }
+        public int AdminRestarts { get { return _adminWeb.Restarts; } }
 
         public void Start()
         {
             if (_app.Adhoc != null) _app.Adhoc.Failed += OnAdhocFailed;
-            if (_app.Web != null) _app.Web.Failed += OnWebFailed;
+            if (_app.WebPublic != null) _app.WebPublic.Failed += OnPublicFailed;
+            if (_app.WebAdmin != null) _app.WebAdmin.Failed += OnAdminFailed;
 
             _thread = new Thread(Loop);
             _thread.IsBackground = true;
@@ -47,19 +74,26 @@ namespace Dpt.AdHoc
             try { _stop.Set(); } catch { }
             try { if (_thread != null && _thread.IsAlive) _thread.Join(2000); } catch { }
             try { if (_app.Adhoc != null) _app.Adhoc.Failed -= OnAdhocFailed; } catch { }
-            try { if (_app.Web != null) _app.Web.Failed -= OnWebFailed; } catch { }
+            try { if (_app.WebPublic != null) _app.WebPublic.Failed -= OnPublicFailed; } catch { }
+            try { if (_app.WebAdmin != null) _app.WebAdmin.Failed -= OnAdminFailed; } catch { }
         }
 
         private void OnAdhocFailed(object sender, EventArgs e)
         {
-            _adhocFault = true;
+            _adhoc.Fault = true;
             Log.Error("APP", "supervisor: adhoc listener reported a failure");
         }
 
-        private void OnWebFailed(object sender, EventArgs e)
+        private void OnPublicFailed(object sender, EventArgs e)
         {
-            _webFault = true;
-            Log.Error("APP", "supervisor: web listener reported a failure");
+            _publicWeb.Fault = true;
+            Log.Error("APP", "supervisor: public web listener reported a failure");
+        }
+
+        private void OnAdminFailed(object sender, EventArgs e)
+        {
+            _adminWeb.Fault = true;
+            Log.Error("APP", "supervisor: admin web listener reported a failure");
         }
 
         private void Loop()
@@ -73,36 +107,16 @@ namespace Dpt.AdHoc
                 try
                 {
                     DateTime now = DateTime.UtcNow;
-
-                    if ((_adhocFault || !_app.Adhoc.IsRunning) && now >= _adhocBackoffUntil)
-                    {
-                        _adhocFault = false;
-                        _adhocRestarts++;
-                        int delay = BackoffSeconds(_adhocRestarts);
-                        _adhocBackoffUntil = now.AddSeconds(delay);
-                        Log.Warn("APP", "supervisor: restarting adhoc listener (attempt " + _adhocRestarts +
-                                        ", next retry not before " + delay + "s)");
-                        bool ok = _app.Adhoc.Restart();
-                        Log.Warn("APP", "supervisor: adhoc restart " + (ok ? "succeeded" : "failed"));
-                    }
-
-                    if ((_webFault || !_app.Web.IsRunning) && now >= _webBackoffUntil)
-                    {
-                        _webFault = false;
-                        _webRestarts++;
-                        int delay = BackoffSeconds(_webRestarts);
-                        _webBackoffUntil = now.AddSeconds(delay);
-                        Log.Warn("APP", "supervisor: restarting web listener (attempt " + _webRestarts +
-                                        ", next retry not before " + delay + "s)");
-                        bool ok = _app.Web.Restart();
-                        Log.Warn("APP", "supervisor: web restart " + (ok ? "succeeded" : "failed"));
-                    }
+                    Check(_adhoc, now);
+                    Check(_publicWeb, now);
+                    Check(_adminWeb, now);
 
                     if ((now - lastMemoryLog).TotalMinutes >= 10)
                     {
                         lastMemoryLog = now;
-                        Log.Info("APP", "health: " + _app.Adhoc.StatusLine() + " || " + _app.Web.StatusLine() +
-                                        " || mem " + (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + "MB");
+                        Log.Info("APP", "health: " + Prefix(_app.Adhoc) + " || " + Prefix(_app.WebPublic) + " || " +
+                                        Prefix(_app.WebAdmin) + " || mem " +
+                                        (_app.WorkingSetBytes / 1048576).ToString(CultureInfo.InvariantCulture) + "MB");
                     }
                 }
                 catch (Exception ex)
@@ -110,6 +124,38 @@ namespace Dpt.AdHoc
                     Log.Error("APP", "supervisor loop: " + ex.Message);
                 }
             }
+        }
+
+        private static string Prefix(object server)
+        {
+            if (server == null) return "n/a";
+            try
+            {
+                Dpt.AdHoc.Net.AdhocServer adhoc = server as Dpt.AdHoc.Net.AdhocServer;
+                if (adhoc != null) return adhoc.StatusLine();
+                Dpt.AdHoc.Web.WebServer web = server as Dpt.AdHoc.Web.WebServer;
+                if (web != null) return web.StatusLine();
+            }
+            catch { }
+            return "?";
+        }
+
+        private void Check(Watched w, DateTime now)
+        {
+            bool running = false;
+            try { running = w.IsRunning(); } catch { running = false; }
+            if (running) return;
+            if (now < w.BackoffUntil) return;
+
+            w.Fault = false;
+            w.Restarts++;
+            int delay = BackoffSeconds(w.Restarts);
+            w.BackoffUntil = now.AddSeconds(delay);
+            Log.Warn("APP", "supervisor: restarting " + w.Name + " (attempt " + w.Restarts +
+                            ", next retry not before " + delay + "s)");
+            bool ok = false;
+            try { ok = w.Restart(); } catch (Exception ex) { Log.Error("APP", "supervisor: " + w.Name + " restart threw: " + ex.Message); }
+            Log.Warn("APP", "supervisor: " + w.Name + " restart " + (ok ? "succeeded" : "failed"));
         }
 
         private static int BackoffSeconds(int attempt)

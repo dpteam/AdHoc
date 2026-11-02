@@ -7,19 +7,22 @@
 
 ```
 Program (bootstrap, аргументы, shutdown)
- ├── Config            config.ini -> объект, нормализация
+ ├── Config            config.ini -> объект, генерация admin token/salt
  ├── Log               Trace -> файл + ring-буфер для UI
+ ├── ApiCrypto         PBKDF2 / HMAC / HMAC-CTR конверт / NonceCache
  ├── GameDatabase      data/games.json  (product id -> название, crosslink)
  ├── ServerState       игры/группы/сессии/история/события   [lock Sync]
  ├── AdhocServer       TCP 27312, протокол, группы, баны, таймауты
- ├── WebServer         TCP 8080, HTTP/1.1, статика, gzip, ETag, rate limit
- ├── WebApi            /api/* и /status.xml
- ├── AppSupervisor     watchdog + backoff
+ ├── WebServer(Public) TCP 44501, read-only, вычищенные данные
+ ├── WebServer(Admin)  TCP 44502, подпись+шифрование, полный доступ
+ ├── WebApi            разветвление public/admin, JSON/XML
+ ├── AppSupervisor     watchdog всех трёх листенеров + backoff
  └── ConsoleUi         статус-строка и команды
 ```
 
-`ServerApp` — общий контекст (Config, Db, State, Adhoc, Web, Version), чтобы не тащить
-зависимости через конструкторы.
+`ServerApp` — общий контекст (Config, Db, State, Adhoc, WebPublic, WebAdmin, Version).
+Обе доски читают один и тот же `ServerState` под одним локом, поэтому «синхронизация» —
+это просто один источник правды, без репликации и таймеров.
 
 ## Потоки
 
@@ -28,26 +31,27 @@ Program (bootstrap, аргументы, shutdown)
 | main | Program | ждёт `StopEvent`, затем graceful shutdown |
 | `adhoc-accept` | AdhocServer | `AcceptTcpClient`, по клиенту — свой поток |
 | `adhoc-<id>` | AdhocServer | блокирующий `Read` сессии, разбор пакетов |
-| `adhoc-maintenance` | AdhocServer | раз в 2 c: очистка пустых игр, банов, зависших сессий |
-| `web-accept` | WebServer | `AcceptTcpClient`, соединение → `ThreadPool` |
-| ThreadPool | WebServer | разбор HTTP, до 100 keep-alive запросов на соединение |
-| `supervisor` | AppSupervisor | раз в 2 c проверяет листенеры, перезапускает |
-| `console-ui` | ConsoleUi | статус-строка + `ReadLine` команды |
+| `adhoc-maintenance` | AdhocServer | раз в 2 c: пустые игры, баны, зависшие сессии |
+| `web-public-accept` | WebServer | TCP 44501 → ThreadPool |
+| `web-admin-accept` | WebServer | TCP 44502 → ThreadPool |
+| `supervisor` | AppSupervisor | раз в 2 c проверяет все листенеры, перезапускает |
+| `console-ui` | ConsoleUi | статус-строка + команды |
 
-Все фоновые потоки `IsBackground = true`: процесс не висит после закрытия окна/`quit`.
+Все фоновые потоки `IsBackground = true`.
 
 ## Блокировки
 
-- `ServerState.Sync` — единственная блокировка на модель (игры ↔ группы ↔ сессии, история, события).
-  Правило: **никогда не делать socket I/O под ней**. Обработчики сначала собирают список
-  `Outbound{Target, Data}`, выходят из `lock` и только потом отправляют.
-- `ClientSession._sendLock` — сериализует запись в сокет (пиры пишут в чужую сессию из разных потоков).
-- `Log` — свой lock на файл и ring-буфер; listener никогда не бросает исключения.
+- `ServerState.Sync` — модель (игры ↔ группы ↔ сессии, история, события). Никогда не делать
+  socket I/O под ней: обработчики собирают `Outbound{Target, Data}`, выходят из `lock` и отправляют.
+- `ClientSession._sendLock` — сериализует запись в сокет.
+- `Log` — файл и ring-буфер; listener не бросает исключений.
 - `AdhocServer._banLock` — баны и счётчики ошибок по IP.
-- `WebServer._rateLock` — окна rate limit.
+- `WebServer._rateLock` — окна rate limit и счётчики неудачных подписей.
 - `GameDatabase._sync` — словари + сохранение файла.
-- Порядок захвата: `State.Sync` → `Db` (только чтение), `State.Sync` → ничего сетевого. Обратных
-  зависимостей нет, дедлоков не возникает.
+- `NonceCache` — свой lock, окно 10 минут, ограничение размера.
+
+Порядок: `State.Sync` → `Db` (только чтение), `State.Sync` → ничего сетевого. Обратных
+зависимостей нет.
 
 ## Обработка сессии
 
@@ -65,8 +69,69 @@ accept -> ClientSession (socket options, timeouts)
        -> finally: CloseSession(reason) -> уведомить пиров, история, счётчики
 ```
 
-`ProcessBuffer` корректно склеивает и дробит TCP-сегменты: один `Read` может принести
-полтора пакета, и наоборот — пакет может прийти по частям.
+## Две веб-морды
+
+```
+                 ┌──────────────────────────────┐
+   internet ──▶  │ 44501 public (WebServer)     │  GET /api/status  -> redacted JSON
+   (NPM/nginx)   │  role = Public               │  GET /api/games   -> каталог
+                 └──────────────┬───────────────┘  GET /status.xml
+                                │
+                        ServerApp / ServerState (один на процесс)
+                                │
+                 ┌──────────────┴───────────────┐
+   LAN only ──▶  │ 44502 admin (WebServer)      │  /api/auth (salt)
+                 │  role = Admin                │  всё остальное: подпись + конверт
+                 └──────────────────────────────┘
+```
+
+Один и тот же класс `WebServer` с полем `Role`:
+
+- порт/bind/fallback берутся из своей пары настроек;
+- `ServeStatic` отдаёт `admin.html` на админском порту и `index.html` на публичном;
+  `/admin.html` на публичном → `404`;
+- `WebApi.Handle` разветвляется на `HandlePublic` / `HandleAdmin`;
+- админский порт при `adminPrivateOnly` отклоняет не-приватные адреса до разбора запроса;
+- публичный порт вообще не обслуживает `POST` и админские пути.
+
+## Авторизация админского API
+
+```
+браузер                                    сервер
+  | GET /api/auth -----------------------> |  { salt, iterations, ts, encrypt }
+  |  K = PBKDF2(token, salt, iter)         |  K = PBKDF2(configToken, configSalt, iter)
+  |  на каждый запрос:                     |
+  |    nonce = random(16)                  |
+  |    ts    = now + skew                  |
+  |    sig   = HMAC(kmac, canonical)       |
+  | --- headers + (sealed) body ---------->|  проверка ts/nonce/подписи/тега
+  | <--- (sealed) JSON --------------------|  SealResponse, если adminEncrypt
+```
+
+- `canonical = METHOD \n path?query \n ts \n nonce \n hex(SHA256(wireBody))`;
+  `path?query` — относительный, поэтому reverse proxy с префиксом не ломает подпись.
+- nonce кэшируется на 10 минут (`NonceCache`), повтор → `401`.
+- тело и ответ — `base64(iv16 | HMAC-CTR(enc) XOR data | tag16)`; тег проверяется
+  побайтово без раннего выхода.
+- 20 неудач за 5 минут с адреса → блок на 5 минут (`_authFails`).
+- Если тело перед шифрованием было gzip — `SealResponse` сначала распаковывает,
+  чтобы клиент получил чистый JSON.
+
+Клиентская реализация (`public/assets/js/crypto.js`, `auth.js`) повторяет C# бит в бит:
+свой SHA-256/HMAC/PBKDF2 на ES5, потому что `crypto.subtle` недоступен на `http://` в LAN.
+
+## Reverse proxy
+
+`WebServer.EffectiveClientIp`:
+
+1. если `trustProxyHeaders=false` — адрес сокета;
+2. если пир не входит в `trustedProxies` (loopback + приватные по умолчанию) — адрес сокета;
+3. иначе берём `X-Forwarded-For` (или `X-Real-IP`), идём **справа налево** и берём первый
+   недоверенный адрес — так внешний клиент не подделает свой адрес, чтобы обойти лимит.
+
+`MapPath` срезает `web.publicBasePath` / `web.adminBasePath` и `X-Forwarded-Prefix`, поэтому
+доска работает и на поддомене, и на `example.com/adhoc/`. Вся статика и API-вызовы в HTML/JS
+относительные — префикс не нужно нигде прописывать.
 
 ## Модель данных
 
@@ -77,35 +142,30 @@ GameEntry (id = канонический product code)
  └── sessions: ClientSession[]        все игроки игры (включая тех, кто без группы)
 ```
 
-- Ключ игры — **resolved** product code (после crosslink), поэтому EU-копия и US-копия
-  попадают в одну `GameEntry`, а `rawId` хранит оригинал для UI.
-- `Founder` — первый вошедший в группу; при выходе передаётся следующему. Именно его MAC
-  уходит в `CONNECT_BSSID`.
-- `History` и `Events` — кольцевые списки с обрезкой (`limits.historySize`, `limits.eventSize`).
-- Пустая игра живёт `emptyGameTtlMin` минут (maintenance-поток), чтобы доска не зарастала.
+- Ключ игры — **resolved** product code (после crosslink).
+- `Founder` — первый вошедший в группу; при выходе передаётся следующему.
+- `History` и `Events` — кольцевые списки с обрезкой.
+- Пустая игра живёт `emptyGameTtlMin` минут (maintenance-поток).
 
 ## HTTP-сервер
 
 `HttpCore.cs` — минимальный, но честный HTTP/1.1:
 
-- разбор request line + заголовков (лимиты: 8 KB строка, 64 KB заголовки, 2 MB тело);
+- разбор request line + заголовков (8 КБ строка, 64 КБ заголовки, 2 МБ тело);
 - `Content-Length` и `Transfer-Encoding: chunked`, `Expect: 100-continue`;
 - keep-alive (до 100 запросов на соединение), иначе `Connection: close`;
-- ответ всегда с `Content-Length`, `Date`, `Server`, `Connection`; для `HEAD` — без тела;
-- для `304` тело не отправляется вообще.
+- ответ всегда с `Content-Length`, `Date`, `Server`, `Connection`; `HEAD` без тела;
+- для `304` тело не отправляется.
 
 `WebServer`:
 
-- `TcpListener` на `web.bindAddress` (`0.0.0.0` по умолчанию) — **не нужен URL ACL/netsh**;
-- fallback-порты;
-- `ThreadPool` + лимит одновременных соединений (`maxConcurrentRequests`);
-- rate limit по IP (скользящее окно 60 c);
-- статика: белый список MIME, защита от `..`, `ETag`/`Last-Modified`/`304`, gzip для текста;
-- `Cache-Control`: `no-cache` для HTML, `max-age=300` для `/assets/`.
-
-Выбор `TcpListener` вместо `HttpListener` сделан осознанно: `HttpListener` на Windows требует
-`netsh http add urlacl` для не-localhost префиксов (то есть admin-прав) и по-разному ведёт себя
-на XP. Для игрового сервера, который запускают двойным кликом, это неприемлемо.
+- `TcpListener` на `publicBind`/`adminBind` — **не нужен URL ACL/netsh**;
+- fallback-порты для обеих досок;
+- `ThreadPool` + лимит одновременных соединений;
+- rate limit по реальному клиенту (скользящая минута);
+- статика: белый список MIME, защита от `..`, `ETag`/`Last-Modified`/`304`, gzip;
+- заголовки безопасности: CSP, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`,
+  `Cross-Origin-Resource-Policy`, `Permissions-Policy`.
 
 ## Логирование
 
@@ -115,28 +175,27 @@ Log.Info("NET", "...")  ->  LogEntry (ring, seq)  ->  Trace.WriteLine(formatted)
                                                           logs/adhoc-YYYYMMDD[.NNN].log
 ```
 
-- `Trace.Listeners.Clear()` один раз в `Log.Configure`, затем добавляется ровно один listener.
-- Listener ловит **все** исключения внутри себя, проверяет флаг shutdown и не пишет в консоль —
-  это защита от классического бага «листенер сдох и всё приложение падает на Trace».
-- `Trace.AutoFlush = false`, запись идёт через `StreamWriter` с `AutoFlush = true` и
-  `FileShare.ReadWrite` (лог можно читать/тейлить на ходу).
-- Ротация: по дате и по размеру (`maxFileMB`), старые файлы удаляются (`retentionDays`).
+- `Trace.Listeners.Clear()` один раз в `Log.Configure`, затем ровно один listener.
+- Listener ловит все исключения внутри себя, проверяет флаг shutdown, не пишет в консоль.
+- `AutoFlush` у файла, `FileShare.ReadWrite` (лог можно тейлить).
+- Ротация по дате и размеру, удаление старых файлов.
 - `Log.Proto(...)` дополнительно управляется `logging.protocolTrace`.
-- Для веб-панели есть ring-буфер в памяти: `/api/logs?since=…` — без чтения файла и без
-  парсинга строк.
+- Ring-буфер для `/api/logs?since=…` — без чтения файла.
+- Запросы к API логируются на уровне `Verbose`, чтобы панель не тонула в `GET /api/status`.
 
 ## Отказоустойчивость
 
-1. **Accept-loop** считает подряд идущие ошибки; после 25 — генерирует `Failed` и выходит,
-   supervisor перезапускает листенер (backoff 1,2,4,8,16,30 c).
-2. **Порты**: основной + fallback-список для adhoc и web.
-3. **Сессии**: idle-таймаут, жёсткий lifetime, лимит RX-буфера, защита от «зависшей» записи
-   (`SendTimeout`), идемпотентное закрытие (`ClientSession.CloseHandled`).
+1. **Accept-loop** каждого листенера считает подряд идущие ошибки; после 25 — `Failed`
+   и выход, supervisor перезапускает (backoff 1,2,4,8,16,30 c).
+2. **Порты**: основной + fallback-список для adhoc, public и admin.
+3. **Сессии**: idle-таймаут, жёсткий lifetime, лимит RX-буфера, `SendTimeout`,
+   идемпотентное закрытие.
 4. **Протокол**: мягкий режим (по умолчанию), строгий включается флагом.
-5. **Абуз**: счётчик ошибок на IP, временный бан, лимиты пользователей на IP и всего.
-6. **HTTP**: лимиты тела/заголовков, rate limit, лимит параллельных запросов, 503 при перегрузе.
-7. **Процесс**: `AppDomain.UnhandledException`, `Console.CancelKeyPress`, `ProcessExit`,
-   финальный `Log.Shutdown()`, `ExitCode` 2 если не удалось занять порт протокола.
+5. **Абуз**: счётчик ошибок на IP, временный бан, лимиты пользователей.
+6. **HTTP**: лимиты тела/заголовков, rate limit, лимит одновременных, 503 при перегрузе,
+   троттлинг неудачных подписей.
+7. **Процесс**: `UnhandledException`, `CancelKeyPress`, `ProcessExit`, финальный `Log.Shutdown`,
+   `ExitCode` 2 если не удалось занять порт протокола.
 
 ## Где что менять
 
@@ -146,14 +205,19 @@ Log.Info("NET", "...")  ->  LogEntry (ring, seq)  ->  Trace.WriteLine(formatted)
 | правила групп/хоста | `AdhocServer.HandleConnect`, `LeaveGroupLocked` |
 | таймауты и лимиты | `Core/Config.cs` (+ `config.example.ini`) |
 | база игр / crosslink | `Core/GameDatabase.cs`, `data/games.json` |
-| JSON API | `Web/WebApi.cs` |
+| публичный JSON (что скрыть) | `Web/WebApi.cs` → `redact`-ветки `BuildStatus`/`WritePlayer` |
+| подпись/шифрование | `Core/ApiCrypto.cs`, `Web/WebServer.cs` (`Authenticate`, `SealResponse`) |
+| пороги прокси/лимитов | `Core/Config.cs` (`trustedProxies`, `requestsPerMinute`) |
 | статика/HTTP | `Web/WebServer.cs`, `Web/HttpCore.cs` |
-| новая плитка/панель UI | `public/index.html`, `public/assets/js/app.js`, `app.css` |
+| UI (обе доски) | `public/index.html`, `public/admin.html`, `public/assets/js/app.js` |
+| вход в админку | `public/assets/js/auth.js`, `public/admin.html` (auth gate) |
 | звуки | `public/assets/js/sound.js` (пресеты — `PRESETS`) |
 
 ## Тесты
 
 - `tools/test-client.ps1` — протокол (LOGIN/CONNECT/SCAN/CHAT/DISCONNECT, BSSID, crosslink).
-- `tools/test-web.ps1` — API, каталог, кик, `/status.xml`, gzip, ETag/304, раздача index.html.
-  Скрипт сам поднимает «держателей» сессий и восстанавливает `data/games.json` после себя.
+- `tools/test-web.ps1` — обе доски: вычистка публичного JSON, скрытые эндпоинты,
+  gzip/ETag/304, подпись, sealed-ответы, replay, битая подпись, кик, чат, каталог.
+- `tools/admin-api.ps1` — клиент админского API (грузит `ApiCrypto` прямо из exe,
+  поэтому тест не может разойтись с сервером).
 - `tools/hold-client.ps1` — держит сессию с пингами (имитация PPSSPP).

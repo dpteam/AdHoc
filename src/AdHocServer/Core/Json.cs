@@ -291,9 +291,13 @@ namespace Dpt.AdHoc.Core
     /// <summary>Streaming JSON writer used by the API. Cheap, allocation friendly, no reflection.</summary>
     public sealed class JsonBuilder
     {
-        private readonly StringBuilder _sb = new StringBuilder(768);
+        private readonly StringBuilder _sb;
         private bool _needComma;
         private int _depth;
+
+        public JsonBuilder() : this(768) { }
+
+        public JsonBuilder(int capacity) { _sb = new StringBuilder(capacity); }
 
         public JsonBuilder BeginObject() { Sep(); _sb.Append('{'); _depth++; _needComma = false; return this; }
         public JsonBuilder EndObject() { _sb.Append('}'); _depth--; _needComma = true; return this; }

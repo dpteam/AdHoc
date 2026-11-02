@@ -79,7 +79,7 @@ accept -> ClientSession (socket options, timeouts)
                  ┌──────────────────────────────┐
    internet ──▶  │ 44501 public (WebServer)     │  GET /api/status  -> redacted JSON
    (NPM/nginx)   │  role = Public               │  GET /api/games   -> каталог
-                 └──────────────┬───────────────┘  GET /status.xml
+                 └──────────────┬───────────────┘  GET /status.xml, /data.json (PPSSPP feed)
                                 │
                         ServerApp / ServerState (один на процесс)
                                 │

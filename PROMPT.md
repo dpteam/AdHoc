@@ -174,3 +174,44 @@ pdp 2817 (2817 dropped) | in 137.85 KB out 0 B
 
 Проверено: relay 24/24, протокол 10/10, веб-тесты зелёные; группа с двумя
 relay-игроками больше не даёт ложный `hint`.
+---
+
+## Итерация 6 — публичный статус для списка серверов PPSSPP + CI
+
+Цель: чтобы сурсы можно было выкладывать как полноценный публичный сервер — с карточкой
+в списке ad hoc серверов PPSSPP и сборками из GitHub Actions.
+
+- [x] **`GET /data.json`** — статус в формате PPSSPP
+      (`docs/multiplayer/adhoc-server-status`): `games[] → groups[] → users[]`,
+      `usercount`, `game_ids`, `pdp_ports`. Путь повторяет то, что читает
+      `ParseDataJson` в `UI/AdhocServerScreen.cpp`, поэтому совместимо «из коробки».
+      Алиас — `/status.json`; `/status.xml` (легаси `<prometheus>`) остался.
+- [x] **`game_ids` со всеми алиасами**: канонический ID + все crosslink-источники
+      (`NPJH50263 → ULUS10511 + ULES01408`), чтобы PPSSPP подтягивал одно название
+      для US/EU/JP копий.
+- [x] **`Groupless`** — игроки в игре, но вне комнаты (как в XML и у других серверов).
+- [x] **Приватность не пострадала**: в `/data.json` только ники, игры, комнаты,
+      счётчики и клиентские PDP-порты. Ни MAC, ни IP, ни session id, ни hairpin.
+      Выключается `web.statusEndpoints=false`, порты — `web.statusPorts=false`.
+- [x] Заголовки для внешних потребителей: `Cache-Control: public, max-age=10`,
+      `Access-Control-Allow-Origin: *`, `Cross-Origin-Resource-Policy: cross-origin`
+      (нужно статус-страницам вроде `lobby-status.html`, которые читают фид из браузера).
+- [x] Метаданные для карточки: `web.serverName` / `serverLocation` / `serverDescription`.
+- [x] **`docs/SERVER_LIST.md`**: схема фида, таблица полей `adhoc-servers.json`
+      (что реально читает `ParseServerListEntriesJSON`), готовый JSON-объект для PR
+      в PPSSPP и грабли: клиент переписывает `https` → `http` (`RemoveHttpsIfNeeded`),
+      значит 80-й порт должен отвечать без редиректа на https.
+- [x] **GitHub Actions** `.github/workflows/build.yml` (`windows-latest`): проверка
+      `csc.exe`, `tools/ci-test.ps1`, артефакт `AdHocServer-win.zip` (без `config.ini`
+      и логов), релиз по тегу `v*` через `gh release`. Логи сервера уходят артефактом
+      при падении.
+- [x] **`tools/ci-test.ps1`** — один прогон: сборка → старт сервера → протокол + релей +
+      веб → стоп, с кодом выхода и хвостом лога при падении. Годится и локально.
+- [x] Тест `tools/test-web.ps1` дополнен 13 проверками фида (200, CORS, кэш, JSON,
+      игры/группы/ники, отсутствие MAC/IP/session id).
+- [x] README: бейдж сборки, раздел «CI и релизы», строка в «Решение проблем»,
+      карта файлов; `config.example.ini` — новые ключи `[web]`.
+
+Проверено: `tools/ci-test.ps1` — протокол 10/10, релей 24/24, веб зелёный;
+`/data.json` на живых сессиях отдаёт кросс-региональные `game_ids`, `Groupless`
+и `pdp_ports`; чистый запуск из zip (без `config.ini`) сам генерирует конфиг.

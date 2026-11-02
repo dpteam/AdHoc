@@ -759,7 +759,9 @@ namespace Dpt.AdHoc.Web
             string path = MapPath(req);
             req.Path = path;
 
-            if (path.Equals("/status.xml", StringComparison.OrdinalIgnoreCase))
+            if (path.Equals("/status.xml", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/data.json", StringComparison.OrdinalIgnoreCase) ||
+                path.Equals("/status.json", StringComparison.OrdinalIgnoreCase))
             {
                 WebApi.Handle(this, req, resp, clientIp);
                 return;
@@ -1004,6 +1006,27 @@ namespace Dpt.AdHoc.Web
         public void SendBytes(HttpRequest req, HttpResponse resp, int status, byte[] data, string contentType,
                               bool gzipAllowed, bool longCache, string etag)
         {
+            SendBytes(req, resp, status, data, contentType, gzipAllowed, longCache, etag, null);
+        }
+
+        /// <summary>
+        /// JSON meant to be read by other programs (the PPSSPP server browser, third-party status
+        /// pages): short cache lifetime and CORS allowed, unlike the board's own API.
+        /// </summary>
+        public void SendPublicJson(HttpRequest req, HttpResponse resp, int status, string json, int maxAgeSec)
+        {
+            Dictionary<string, string> extra = new Dictionary<string, string>();
+            extra["Cache-Control"] = "public, max-age=" + maxAgeSec.ToString(CultureInfo.InvariantCulture);
+            extra["Access-Control-Allow-Origin"] = "*";
+            extra["Cross-Origin-Resource-Policy"] = "cross-origin";
+            SendBytes(req, resp, status, Encoding.UTF8.GetBytes(json ?? ""),
+                      "application/json; charset=utf-8", true, false, null, extra);
+        }
+
+        public void SendBytes(HttpRequest req, HttpResponse resp, int status, byte[] data, string contentType,
+                              bool gzipAllowed, bool longCache, string etag,
+                              Dictionary<string, string> extraHeaders)
+        {
             if (data == null) data = new byte[0];
             resp.Status = status;
             resp.ContentType = contentType;
@@ -1023,6 +1046,9 @@ namespace Dpt.AdHoc.Web
                 resp.Body = data;
             }
             ApplySecurityHeaders(resp);
+            if (extraHeaders != null)
+                foreach (KeyValuePair<string, string> kv in extraHeaders)
+                    resp.Set(kv.Key, kv.Value);
         }
 
         public static byte[] Gzip(byte[] input)

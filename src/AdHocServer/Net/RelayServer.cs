@@ -165,6 +165,27 @@ namespace Dpt.AdHoc.Net
             }
         }
 
+        /// <summary>PDP ports this MAC has open right now (for the public status feed).</summary>
+        public List<int> PdpPortsForMac(byte[] mac)
+        {
+            List<int> ports = new List<int>();
+            if (mac == null) return ports;
+            string macKey = MacKey(mac, 0);
+            lock (_sync)
+            {
+                foreach (KeyValuePair<string, RelayConn> kv in _sessions)
+                {
+                    RelayConn c = kv.Value;
+                    if (c.Kind != 0 || c.Closed) continue;
+                    if (!string.Equals(MacKey(c.Src, 0), macKey, StringComparison.Ordinal)) continue;
+                    int port = c.Sport;
+                    if (!ports.Contains(port)) ports.Add(port);
+                }
+            }
+            ports.Sort();
+            return ports;
+        }
+
         // ------------------------------------------------------------ lifecycle
 
         public bool Start()

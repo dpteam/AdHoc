@@ -1,5 +1,7 @@
 # DPT.PSP AdHoc Server
 
+[![build](https://github.com/dpteam/AdHoc/actions/workflows/build.yml/badge.svg)](https://github.com/dpteam/AdHoc/actions/workflows/build.yml)
+
 Сервер ad-hoc сети для PSP-игр (PPSSPP / PRO Online, протокол `SceNetAdhocctl`) на **.NET Framework 4.0**,
 совместимый с Windows XP SP3, **без единой сторонней библиотеки**.
 
@@ -34,6 +36,9 @@ admin  44502   <-- админка для локалки: кик, чат, бан�
 - Статистика, лента событий, недавние выходы с причиной, каталог игр (только просмотр).
 - Темы light/dark/OLED, мягкие звуки, поиск, автообновление.
 - Никаких MAC, IP, session id, логов и кнопок модерации.
+- **Статус для списка серверов PPSSPP**: `/data.json` (и `/status.xml`) — игры, комнаты, ники,
+  `game_ids` со всеми региональными алиасами. Формат и готовый JSON для заявки в PPSSPP —
+  [docs/SERVER_LIST.md](docs/SERVER_LIST.md).
 
 **Админская доска (`44502`)**
 - Всё то же + MAC, IP, idle, трафик, кик, сообщение всем игрокам, баны, правка каталога,
@@ -215,6 +220,7 @@ tools/test-relay.ps1               тест релея (PDP + PTP handshake, б�
 tools/hold-relay.ps1               «держатель» PDP-сессии релея (ручные проверки)
 tools/build_games_db.py            пересборка data/games.json из pspudb
 tools/test-web.ps1                 тест обеих досок (вычистка, подпись, replay, шифрование)
+tools/ci-test.ps1                  всё сразу: собрать, поднять сервер, прогнать три набора
 tools/admin-api.ps1                клиент админского API для PowerShell
 tools/firewall.cmd / .ps1          правила Windows Firewall для трёх портов
 tools/hold-client.ps1              «держатель» сессии для ручных проверок
@@ -222,7 +228,9 @@ docs/PROTOCOL.md                   байтовый формат пакетов
 docs/ARCHITECTURE.md               потоки, блокировки, отказоустойчивость
 docs/API.md                        HTTP API
 docs/RELAY.md                      ретранслятор: зачем, как включить, протокол
+docs/SERVER_LIST.md                /data.json и заявка в список серверов PPSSPP
 docs/SECURITY.md                   модель угроз, подпись/шифрование, reverse proxy
+.github/workflows/build.yml        CI: сборка + тесты + артефакт (релиз по тегу v*)
 ```
 
 ## Сборка и проверка
@@ -232,6 +240,13 @@ build.cmd
 powershell -File tools\test-client.ps1
 powershell -File tools\test-relay.ps1
 powershell -File tools\test-web.ps1
+```
+
+Всё одной командой (то же, что делает CI — собирает, поднимает сервер, гоняет тесты,
+гасит сервер и возвращает код выхода):
+
+```bat
+powershell -File tools\ci-test.ps1
 ```
 
 `build.cmd` собирает `bin\AdHocServer.exe`, копирует `public/` и `config.example.ini`.
@@ -247,6 +262,18 @@ python tools/build_games_db.py --pspudb database.db --games data/games.json --ou
 
 > Правя фронтенд, запустите `build.cmd` (или скопируйте `public/` в `bin/public/`) и поднимите
 > `?v=` у CSS/JS в HTML, иначе браузер отдаст кеш.
+
+## CI и релизы
+
+`.github/workflows/build.yml` — GitHub Actions, `windows-latest`:
+
+1. проверяет наличие `csc.exe` (.NET Framework 4.x) и печатает версию;
+2. `tools/ci-test.ps1`: сборка → старт сервера → протокол + релей + веб → стоп;
+3. пакует `bin\*` в `AdHocServer-win.zip` (без `config.ini` и логов) и кладёт в артефакты;
+4. на теге `v*` — создаёт GitHub Release и прикладывает zip туда же.
+
+Локально то же самое: `powershell -File tools\ci-test.ps1`. Артефакт самодостаточен:
+распаковать, запустить `AdHocServer.exe` — `config.ini` с новым токеном создастся при первом старте.
 
 ## Совместимость
 
@@ -266,6 +293,7 @@ python tools/build_games_db.py --pspudb database.db --games data/games.json --ou
 | PPSSPP не видит лобби | порт 27312, IP сервера, игра запущена; в логе будет `LOGIN` |
 | Играю через свой внешний IP, лобби видит, но не коннектит | NAT hairpin: включите в PPSSPP «Try to use server-provided packet relay» (порт 27313), см. [docs/RELAY.md](docs/RELAY.md) |
 | Игроки одной игры не видят друг друга | разные региональные ID → добавьте crosslink в каталоге; **или смешанный транспорт** (один через relay, другой напрямую) — включите relay у всех, см. [docs/RELAY.md](docs/RELAY.md) |
+| Пустая карточка сервера в списке PPSSPP | статус качается по **HTTP** (клиент переписывает `https` → `http`): `http://host/data.json` должен отвечать без редиректа на https; см. [docs/SERVER_LIST.md](docs/SERVER_LIST.md) |
 | Лобби видно, а **сессии в игре** — нет | разные `Network → Port offset` (десктоп `0`, Android `10000`): сервер переводит порты автоматически, но лучше выставить одинаковый offset у всех; см. [docs/RELAY.md](docs/RELAY.md#разные-port-offset--главная-причина-сессии-не-находятся-в-игре) |
 | Нет иконок | нет CDN; положите Font Awesome локально в `public/assets/vendor/` |
 | Нет звука | autoplay блокируется до первого клика по странице |

@@ -116,6 +116,24 @@ try {
     $xml = (Get-Status ($PublicBase + '/status.xml')).Content
     Assert ($xml -like '*<prometheus usercount=*') 'legacy status.xml on public' ''
 
+    # PPSSPP server-browser feed (/data.json)
+    $feedRaw = (Get-Status ($PublicBase + '/data.json'))
+    $feed = Get-Json ($PublicBase + '/data.json')
+    Assert ($feedRaw.Status -eq 200) 'data.json served on public' ''
+    Assert ($feedRaw.Headers['Access-Control-Allow-Origin'] -eq '*') 'data.json allows CORS' ("hdr=" + $feedRaw.Headers['Access-Control-Allow-Origin'])
+    Assert (($feedRaw.Headers['Cache-Control'] -like '*max-age=*')) 'data.json is briefly cacheable' ("hdr=" + $feedRaw.Headers['Cache-Control'])
+    Assert ($feedRaw.Headers['Content-Type'] -like 'application/json*') 'data.json is json' ''
+    Assert ($null -ne $feed.games -and @($feed.games).Count -ge 1) 'data.json has games array' ''
+    $feedGame = @($feed.games) | Where-Object { @($_.game_ids) -contains 'ULUS10084' } | Select-Object -First 1
+    Assert ($null -ne $feedGame) 'data.json lists the live game by id' ''
+    Assert (@($feedGame.groups | Where-Object { $_.name -eq 'ABCD1234' }).Count -eq 1) 'data.json has the group' ''
+    Assert (@(@($feedGame.groups | Where-Object { $_.name -eq 'ABCD1234' })[0].users).Count -eq 2) 'data.json has group users' ''
+    $feedText = $feedRaw.Content
+    Assert ($feedText -notmatch '"mac"') 'data.json has no MAC' ''
+    Assert ($feedText -notmatch '"ip"') 'data.json has no IP' ''
+    Assert ($feedText -notmatch '"hairpin"') 'data.json has no hairpin flags' ''
+    Assert ($feedText -notmatch 'sessionId') 'data.json has no session ids' ''
+
     $hist = Get-Json ($PublicBase + '/api/history?limit=10')
     Assert ($hist.ok) 'public history' ''
     Assert (($hist.history | Measure-Object).Count -ge 0) 'history redacted' ''

@@ -35,7 +35,15 @@ namespace Dpt.AdHoc.Web
             {
                 case "/status.xml":
                     if (!isGet) return false;
+                    if (!web.Config.StatusEndpoints) { web.SendJson(req, resp, 403, Err("status endpoints are disabled by config")); return true; }
                     web.SendXml(req, resp, 200, BuildStatusXml(web, true));
+                    return true;
+
+                case "/data.json":
+                case "/status.json":
+                    if (!isGet) return false;
+                    if (!web.Config.StatusEndpoints) { web.SendJson(req, resp, 403, Err("status endpoints are disabled by config")); return true; }
+                    web.SendPublicJson(req, resp, 200, BuildDataJson(web), 10);
                     return true;
 
                 case "/api/health":
@@ -104,7 +112,15 @@ namespace Dpt.AdHoc.Web
             {
                 case "/status.xml":
                     if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    if (!web.Config.StatusEndpoints) { web.SendJson(req, resp, 403, Err("status endpoints are disabled by config")); return true; }
                     web.SendXml(req, resp, 200, BuildStatusXml(web, false));
+                    return true;
+
+                case "/data.json":
+                case "/status.json":
+                    if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    if (!web.Config.StatusEndpoints) { web.SendJson(req, resp, 403, Err("status endpoints are disabled by config")); return true; }
+                    web.SendPublicJson(req, resp, 200, BuildDataJson(web), 10);
                     return true;
 
                 case "/api/status":
@@ -475,6 +491,129 @@ namespace Dpt.AdHoc.Web
                 jb.Prop("relaySessions", relaySessions);
             }
             jb.EndObject();
+        }
+
+        /// <summary>
+        /// PPSSPP server-browser status feed (https://www.ppsspp.org/docs/multiplayer/adhoc-server-status/).
+        /// Shape: {"games":[{"name","usercount","game_ids":[],"groups":[{"name","usercount","users":[...]}]}]}.
+        /// Same data as the public board: nicks, game/group names, counts, client PDP ports.
+        /// No MAC, no IP, no session ids.
+        /// </summary>
+        private static string BuildDataJson(WebServer web)
+        {
+            ServerState st = web.App.State;
+            GameDatabase db = web.App.Db;
+            bool withPorts = web.Config.StatusPorts && web.App.Relay != null && web.App.Relay.IsRunning;
+
+            // src id -> canonical id, so region variants of one game land in one entry
+            Dictionary<string, List<string>> aliases = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, string> link in db.SnapshotLinks())
+            {
+                string src = GameDatabase.NormalizeId(link.Key);
+                string dst = db.Resolve(src);
+                if (src.Length == 0 || dst.Length == 0 || string.Equals(src, dst, StringComparison.OrdinalIgnoreCase)) continue;
+                List<string> list;
+                if (!aliases.TryGetValue(dst, out list)) { list = new List<string>(); aliases[dst] = list; }
+                if (!list.Contains(src)) list.Add(src);
+            }
+
+            JsonBuilder jb = new JsonBuilder(2048);
+            jb.BeginObject();
+            jb.Prop("name", web.Config.ServerName);
+            if (!string.IsNullOrEmpty(web.Config.ServerLocation)) jb.Prop("location", web.Config.ServerLocation);
+            if (!string.IsNullOrEmpty(web.Config.ServerDescription)) jb.Prop("description", web.Config.ServerDescription);
+            jb.Prop("relay", web.App.Relay != null && web.App.Relay.IsRunning);
+            jb.Prop("updatedUtc", Util.Iso(DateTime.UtcNow));
+
+            lock (st.Sync)
+            {
+                jb.Prop("usercount", st.Sessions.Count);
+                jb.Name("games").BeginArray();
+
+                foreach (KeyValuePair<string, GameEntry> kv in st.Games)
+                {
+                    GameEntry g = kv.Value;
+                    if (g.Sessions.Count == 0) continue;
+
+                    string canonical = db.Resolve(g.Id);
+                    List<string> ids = new List<string>();
+                    if (canonical.Length > 0) ids.Add(canonical);
+                    if (!ids.Contains(g.Id)) ids.Add(g.Id);
+                    List<string> aliasList;
+                    if (aliases.TryGetValue(canonical, out aliasList))
+                        for (int i = 0; i < aliasList.Count && ids.Count < 16; i++)
+                            if (!ids.Contains(aliasList[i])) ids.Add(aliasList[i]);
+
+                    jb.BeginObject();
+                    jb.Prop("name", db.DisplayName(g.Id));
+                    jb.Prop("usercount", g.Sessions.Count);
+                    jb.Name("game_ids").BeginArray();
+                    for (int i = 0; i < ids.Count; i++) jb.Str(ids[i]);
+                    jb.EndArray();
+
+                    jb.Name("groups").BeginArray();
+                    int inGroups = 0;
+                    for (int i = 0; i < g.Groups.Count; i++)
+                    {
+                        GroupEntry group = g.Groups[i];
+                        jb.BeginObject();
+                        jb.Prop("name", group.Name ?? "");
+                        jb.Prop("usercount", group.Sessions.Count);
+                        jb.Name("users").BeginArray();
+                        for (int s = 0; s < group.Sessions.Count; s++)
+                        {
+                            ClientSession cs = group.Sessions[s];
+                            jb.BeginObject();
+                            jb.Prop("name", cs.Nickname);
+                            if (withPorts)
+                            {
+                                jb.Name("pdp_ports").BeginArray();
+                                List<int> ports = web.App.Relay.PdpPortsForMac(cs.Mac);
+                                for (int p = 0; p < ports.Count; p++) jb.Num(ports[p]);
+                                jb.EndArray();
+                            }
+                            jb.EndObject();
+                        }
+                        jb.EndArray();
+                        jb.EndObject();
+                        inGroups += group.Sessions.Count;
+                    }
+
+                    // players online in this game but not in any room yet
+                    if (g.Sessions.Count > inGroups)
+                    {
+                        jb.BeginObject();
+                        jb.Prop("name", "Groupless");
+                        jb.Prop("usercount", g.Sessions.Count - inGroups);
+                        jb.Name("users").BeginArray();
+                        for (int s = 0; s < g.Sessions.Count; s++)
+                        {
+                            ClientSession cs = g.Sessions[s];
+                            if (cs.Group != null) continue;
+                            jb.BeginObject();
+                            jb.Prop("name", cs.Nickname);
+                            if (withPorts)
+                            {
+                                jb.Name("pdp_ports").BeginArray();
+                                List<int> ports = web.App.Relay.PdpPortsForMac(cs.Mac);
+                                for (int p = 0; p < ports.Count; p++) jb.Num(ports[p]);
+                                jb.EndArray();
+                            }
+                            jb.EndObject();
+                        }
+                        jb.EndArray();
+                        jb.EndObject();
+                    }
+
+                    jb.EndArray();
+                    jb.EndObject();
+                }
+
+                jb.EndArray();
+            }
+
+            jb.EndObject();
+            return jb.ToString();
         }
 
         private static string BuildStatusXml(WebServer web, bool redact)

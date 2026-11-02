@@ -20,6 +20,7 @@
 | GET | `/api/history?limit=50` | завершённые сессии (без MAC/IP) |
 | GET | `/api/health` | `{"ok":true,"role":"public","uptimeSec":…}` |
 | GET | `/status.xml` | легаси PRO Online XML |
+| GET | `/data.json` | статус для списка серверов PPSSPP (`/status.json` — алиас), CORS `*`, см. [SERVER_LIST.md](SERVER_LIST.md) |
 | GET | `/` | публичная доска (`index.html`) |
 
 Пример ответа `/api/status` (сокращён):

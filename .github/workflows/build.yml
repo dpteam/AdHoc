@@ -1,0 +1,75 @@
+name: build
+
+# Builds with the stock .NET Framework 4.x csc.exe (no NuGet, no MSBuild), then
+# starts the server and runs the protocol, relay and web suites against it.
+
+on:
+  push:
+    branches: [ master, main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $csc)) { throw "csc.exe from .NET Framework 4.x not found" }
+          "csc: $csc"
+          (Get-Item $csc).VersionInfo.FileVersion
+          "PS: " + $PSVersionTable.PSVersion
+
+      - name: Build and test
+        shell: powershell
+        run: .\tools\ci-test.ps1
+
+      - name: Package
+        if: success()
+        shell: pwsh
+        run: |
+          # config.ini holds a generated admin token - never ship it, the server
+          # recreates it from config.example.ini on first start
+          Remove-Item bin\config.ini -ErrorAction SilentlyContinue
+          Remove-Item bin\logs\*.log -ErrorAction SilentlyContinue
+          Compress-Archive -Path bin\* -DestinationPath AdHocServer-win.zip -Force
+          Get-Item AdHocServer-win.zip | Select-Object Name, Length
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdHocServer-win
+          path: AdHocServer-win.zip
+          if-no-files-found: error
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: bin/logs
+          if-no-files-found: ignore
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME AdHocServer-win.zip --title $env:GITHUB_REF_NAME --generate-notes
+          } else {
+            gh release upload $env:GITHUB_REF_NAME AdHocServer-win.zip --clobber
+          }

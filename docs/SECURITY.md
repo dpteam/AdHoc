@@ -132,11 +132,12 @@ proxy_read_timeout 30s;
 
 1. Пробрасываете **только** `44501`. `44502` остаётся в LAN.
 2. На NPM включите TLS (Let's Encrypt) и HSTS для публичного хоста.
-3. Проверьте: `https://ваш-хост/api/logs` → `404`, `https://ваш-хост/api/status` без `"mac"`.
-4. Админку открывайте по LAN-адресу: `http://192.168.x.x:44502/`, токен из `config.ini`.
-5. `config.ini`: `adminPrivateOnly=true`, `adminEncrypt=true`, `trustProxyHeaders=true`,
+3. Один раз выполните `tools\firewall.cmd` (UAC) — правила привязаны к exe и к приватным сетям.
+4. Проверьте: `https://ваш-хост/api/logs` → `404`, `https://ваш-хост/api/status` без `"mac"`.
+5. Админку открывайте по LAN-адресу: `http://192.168.x.x:44502/`, токен из `config.ini`.
+6. `config.ini`: `adminPrivateOnly=true`, `adminEncrypt=true`, `trustProxyHeaders=true`,
    `trustedProxies` = подсеть NPM/роутера.
-6. Не публикуйте `config.ini` и папку `logs/` (они и так в `.gitignore`).
+7. Не публикуйте `config.ini` и папку `logs/` (они и так в `.gitignore`).
 
 ## Что можно улучшить при желании
 

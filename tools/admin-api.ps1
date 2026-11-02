@@ -1,4 +1,4 @@
-# =========================================================================
+﻿# =========================================================================
 #  Helper for the admin API (signed + sealed requests).
 #  Uses the server's own ApiCrypto implementation so the test cannot drift
 #  from the protocol: Add-Type loads bin\AdHocServer.exe as an assembly.

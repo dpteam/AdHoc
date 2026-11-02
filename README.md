@@ -59,6 +59,27 @@ run.cmd
 
 > .NET Framework 4.0+ (на XP SP3 — именно 4.0). Сборка стоковым `csc.exe`, без NuGet/MSBuild.
 
+### Фаервол Windows
+
+Один раз запустите (появится UAC — «Да»):
+
+```bat
+tools\firewall.cmd
+```
+
+Скрипт читает порты из `bin\config.ini` и создаёт входящие TCP-правила, привязанные к
+`AdHocServer.exe`:
+
+| Правило | Порт | Источники |
+|---|---|---|
+| `DPT.PSP AdHoc` | 27312 | любые (игроки из интернета) |
+| `DPT.PSP Public board` | 44501 | LAN/приватные (NPM рядом) |
+| `DPT.PSP Admin board` | 44502 | только LAN/приватные |
+
+Опции: `-PublicAny` (публичный порт с любых адресов), `-AdhocLanOnly` (adhoc только LAN),
+`-Remove` (удалить правила). Скрипт печатает локальные IPv4, состояние сокетов и проверку
+`/api/health` — удобно сразу увидеть, что и куда прокидывать в NPM.
+
 ## Reverse proxy (NGinx Proxy Manager / nginx / NAT hairpin)
 
 Пробрасывайте наружу **только** публичный порт `44501`; админский `44502` держите в LAN.
@@ -174,6 +195,7 @@ data/games.json                    база названий (создаётся
 tools/test-client.ps1              тест протокола
 tools/test-web.ps1                 тест обеих досок (вычистка, подпись, replay, шифрование)
 tools/admin-api.ps1                клиент админского API для PowerShell
+tools/firewall.cmd / .ps1          правила Windows Firewall для трёх портов
 tools/hold-client.ps1              «держатель» сессии для ручных проверок
 docs/PROTOCOL.md                   байтовый формат пакетов
 docs/ARCHITECTURE.md               потоки, блокировки, отказоустойчивость
@@ -208,7 +230,7 @@ powershell -File tools\test-web.ps1
 | Симптом | Что делать |
 |---|---|
 | `port … is busy` в логе | порт занят, сервер уже взял fallback-порт — смотрите лог/консоль |
-| Публичная доска не открывается по IP | фаервол Windows: разрешить `AdHocServer.exe` (частные сети) |
+| Публичная доска не открывается по IP | фаервол Windows: `tools\firewall.cmd`; в NPM указывайте LAN-IP машины, а не `127.0.0.1` (если NPM в Docker — это контейнер) |
 | «нужен admin token» / 401 | токен из `config.ini` → `web.adminToken`; проверьте часы (окно ±180 с) |
 | 403 на админке | вы не в приватной сети (`web.adminPrivateOnly`) |
 | PPSSPP не видит лобби | порт 27312, IP сервера, игра запущена; в логе будет `LOGIN` |

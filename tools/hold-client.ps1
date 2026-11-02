@@ -1,4 +1,4 @@
-# Holds one adhoc session open for N seconds (used by tools\test-web.ps1).
+﻿# Holds one adhoc session open for N seconds (used by tools\test-web.ps1).
 param(
     [string]$Server = '127.0.0.1',
     [int]$Port = 27312,

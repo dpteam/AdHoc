@@ -276,7 +276,8 @@ namespace Dpt.AdHoc.Web
                         if (!redact) jb.Prop("createdUtc", Util.Iso(group.CreatedUtc));
                         jb.Name("members").BeginArray();
                         for (int si = 0; si < group.Sessions.Count; si++)
-                            WritePlayer(jb, group.Sessions[si], group.Founder == group.Sessions[si], redact);
+                            WritePlayer(jb, group.Sessions[si], group.Founder == group.Sessions[si], redact,
+                                RelayCount(app, group.Sessions[si]));
                         jb.EndArray();
                         jb.EndObject();
                     }
@@ -287,7 +288,7 @@ namespace Dpt.AdHoc.Web
                     {
                         ClientSession s = g.Sessions[si];
                         if (s.Group != null) continue;
-                        WritePlayer(jb, s, false, redact);
+                        WritePlayer(jb, s, false, redact, RelayCount(app, s));
                     }
                     jb.EndArray();
                     jb.EndObject();
@@ -442,7 +443,13 @@ namespace Dpt.AdHoc.Web
             return jb.ToString();
         }
 
-        private static void WritePlayer(JsonBuilder jb, ClientSession s, bool isHost, bool redact)
+        private static int RelayCount(ServerApp app, ClientSession s)
+        {
+            try { return app.Relay != null && app.Relay.IsRunning ? app.Relay.CountForMac(s.Mac) : 0; }
+            catch { return 0; }
+        }
+
+        private static void WritePlayer(JsonBuilder jb, ClientSession s, bool isHost, bool redact, int relaySessions)
         {
             jb.BeginObject();
             if (!redact) jb.Prop("id", s.Id);
@@ -462,7 +469,11 @@ namespace Dpt.AdHoc.Web
                 jb.Prop("pings", s.Pings);
             }
             jb.Prop("isHost", isHost);
-            if (!redact) jb.Prop("hairpin", s.Hairpin);
+            if (!redact)
+            {
+                jb.Prop("hairpin", s.Hairpin);
+                jb.Prop("relaySessions", relaySessions);
+            }
             jb.EndObject();
         }
 

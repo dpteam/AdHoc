@@ -1202,3 +1202,17 @@ input[type="range"]::-moz-range-thumb {
 .chip.hairpin i { font-size: 9px; }
 
 .feed .li.t-hint .ico { color: var(--info); }
+
+.chip.relay {
+  margin-left: 6px;
+  color: var(--info);
+  border-color: rgba(61, 127, 184, .45);
+  background: rgba(61, 127, 184, .12);
+}
+.chip.p2p {
+  margin-left: 6px;
+  color: var(--muted);
+  border-color: var(--border);
+  background: transparent;
+}
+.chip.relay i, .chip.p2p i { font-size: 9px; }

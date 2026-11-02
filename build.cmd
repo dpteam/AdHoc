@@ -42,7 +42,7 @@ xcopy "%ROOT%public" "%OUT%\public\" /E /I /Y /Q >nul
 xcopy "%ROOT%config.example.ini" "%OUT%\" /Y /Q >nul
 if not exist "%OUT%\data" mkdir "%OUT%\data"
 if not exist "%OUT%\logs" mkdir "%OUT%\logs"
-if not exist "%OUT%\data\games.json" if exist "%ROOT%data\games.json" copy "%ROOT%data\games.json" "%OUT%\data\" /Y >nul
+if exist "%ROOT%data\games.json" xcopy "%ROOT%data\games.json" "%OUT%\data\" /D /Y >nul
 
 echo [4/4] done.
 echo.

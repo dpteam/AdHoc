@@ -509,8 +509,15 @@
     var hairpin = (IS_ADMIN && p.hairpin)
       ? '<span class="chip hairpin" title="Источник — шлюз этой машины (NAT hairpin). Включите ретранслятор в PPSSPP."><i class="fas fa-arrows-rotate"></i> hairpin</span>'
       : '';
+    var transport = '';
+    if (IS_ADMIN && App.status && App.status.relay && App.status.relay.enabled) {
+      var relayOn = (p.relaySessions || 0) > 0;
+      transport = relayOn
+        ? '<span class="chip relay" title="Игровой трафик идёт через ретранслятор"><i class="fas fa-tower-broadcast"></i> relay</span>'
+        : '<span class="chip p2p" title="Прямой UDP (без ретранслятора). В смешанной группе это ломает видимость."><i class="fas fa-diagram-project"></i> p2p</span>';
+    }
     var html = '<tr>' +
-      '<td class="nick">' + UI.esc(p.name) + crown + hairpin + '</td>';
+      '<td class="nick">' + UI.esc(p.name) + crown + hairpin + transport + '</td>';
 
     if (IS_ADMIN) {
       var idleWarn = (p.idleSec || 0) > 15 ? ' warn' : '';

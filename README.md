@@ -22,6 +22,7 @@ admin  44502   <-- админка для локалки: кик, чат, бан�
   и ответы `CONNECT_BSSID`, `CONNECT`, `DISCONNECT`, `SCAN`, `SCAN_COMPLETE`, `CHAT`.
 - Группы (комнаты), хост группы (BSSID) = основатель, уведомления пирам, чат внутри группы.
 - Кросс-региональные игры (`crosslink`): EU/JP/US копии попадают в одно лобби.
+- База имён: **3900+ product ID** (UMD и PSN-издания), см. `data/games.json`.
 - Таймауты сессий, лимиты на IP и на всех, автоочистка пустых игр, дубли MAC.
 - Мягкий режим: неизвестный опкод не убивает сессию, а логируется.
 - **Ретранслятор** (`aemu_postoffice`, TCP 27313): игровой трафик идёт через сервер —
@@ -211,6 +212,8 @@ public/assets/js/auth.js           клиент админского API (под
 data/games.json                    база названий (создаётся/правится автоматически)
 tools/test-client.ps1              тест протокола
 tools/test-relay.ps1               тест релея (PDP + PTP handshake, байты в обе стороны)
+tools/hold-relay.ps1               «держатель» PDP-сессии релея (ручные проверки)
+tools/build_games_db.py            пересборка data/games.json из pspudb
 tools/test-web.ps1                 тест обеих досок (вычистка, подпись, replay, шифрование)
 tools/admin-api.ps1                клиент админского API для PowerShell
 tools/firewall.cmd / .ps1          правила Windows Firewall для трёх портов
@@ -227,12 +230,20 @@ docs/SECURITY.md                   модель угроз, подпись/ши�
 ```bat
 build.cmd
 powershell -File tools\test-client.ps1
+powershell -File tools\test-relay.ps1
 powershell -File tools\test-web.ps1
 ```
 
 `build.cmd` собирает `bin\AdHocServer.exe`, копирует `public/` и `config.example.ini`.
 Тест API сам поднимает «держателей» сессий и восстанавливает `data/games.json` после себя.
 Проект открывается в Visual Studio 2010+ (`src/AdHocServer/AdHocServer.csproj`).
+
+База игр пересобирается скриптом `tools/build_games_db.py` (нужен дамп
+[pspudb](https://github.com/georgemoralis/pspudb) — `pspudb/data/database.db`):
+
+```bash
+python tools/build_games_db.py --pspudb database.db --games data/games.json --out data/games.json
+```
 
 > Правя фронтенд, запустите `build.cmd` (или скопируйте `public/` в `bin/public/`) и поднимите
 > `?v=` у CSS/JS в HTML, иначе браузер отдаст кеш.
@@ -254,12 +265,14 @@ powershell -File tools\test-web.ps1
 | 403 на админке | вы не в приватной сети (`web.adminPrivateOnly`) |
 | PPSSPP не видит лобби | порт 27312, IP сервера, игра запущена; в логе будет `LOGIN` |
 | Играю через свой внешний IP, лобби видит, но не коннектит | NAT hairpin: включите в PPSSPP «Try to use server-provided packet relay» (порт 27313), см. [docs/RELAY.md](docs/RELAY.md) |
-| Игроки одной игры не видят друг друга | разные региональные ID → добавьте crosslink в каталоге |
+| Игроки одной игры не видят друг друга | разные региональные ID → добавьте crosslink в каталоге; **или смешанный транспорт** (один через relay, другой напрямую) — включите relay у всех, см. [docs/RELAY.md](docs/RELAY.md) |
 | Нет иконок | нет CDN; положите Font Awesome локально в `public/assets/vendor/` |
 | Нет звука | autoplay блокируется до первого клика по странице |
 
 ## Атрибуция
 
-Таблица Product ID → название и crosslink'и взяты из открытого исходного кода PPSSPP
-(`Core/HLE/proAdhocServer.cpp`, проект PRO Online, GPLv3) и дополняются через веб-интерфейс
-в `data/games.json`. Сам сервер написан с нуля и не содержит кода PPSSPP.
+- Названия и crosslink'и изначально взяты из PPSSPP (`Core/HLE/proAdhocServer.cpp`, проект
+  PRO Online, GPLv3); crosslink'и правятся в веб-интерфейсе и лежат в `data/games.json`.
+- Массовая база Product ID → название собрана из [pspudb](https://github.com/georgemoralis/pspudb)
+  (`pspudb/data/database.db`, GPL-2.0): только пары «серийник/название», без кода проекта.
+- Сам сервер написан с нуля и не содержит кода PPSSPP или pspudb.

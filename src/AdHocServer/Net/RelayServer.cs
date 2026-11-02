@@ -101,6 +101,7 @@ namespace Dpt.AdHoc.Net
         private readonly object _sync = new object();
         private readonly Dictionary<string, RelayConn> _sessions = new Dictionary<string, RelayConn>(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _perIp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> _byMac = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         private TcpListener _listener;
         private UdpClient _udpProbe;
@@ -135,6 +136,18 @@ namespace Dpt.AdHoc.Net
         public long BytesIn { get { return Interlocked.Read(ref _bytesIn); } }
         public long BytesOut { get { return Interlocked.Read(ref _bytesOut); } }
         public long PtpPairs { get { return Interlocked.Read(ref _ptpPairs); } }
+
+        /// <summary>How many relay sessions this MAC has right now (0 = likely a direct/P2P player).</summary>
+        public int CountForMac(byte[] mac)
+        {
+            if (mac == null) return 0;
+            string key = MacKey(mac, 0);
+            lock (_sync)
+            {
+                int count;
+                return _byMac.TryGetValue(key, out count) ? count : 0;
+            }
+        }
 
         // ------------------------------------------------------------ lifecycle
 
@@ -635,6 +648,11 @@ namespace Dpt.AdHoc.Net
                 int count;
                 _perIp.TryGetValue(c.RemoteIp, out count);
                 _perIp[c.RemoteIp] = count + 1;
+
+                string macKey = MacKey(c.Src, 0);
+                int macCount;
+                _byMac.TryGetValue(macKey, out macCount);
+                _byMac[macKey] = macCount + 1;
             }
 
             c.Name = name;
@@ -663,6 +681,14 @@ namespace Dpt.AdHoc.Net
                 {
                     if (count <= 1) _perIp.Remove(c.RemoteIp);
                     else _perIp[c.RemoteIp] = count - 1;
+                }
+
+                string macKey = MacKey(c.Src, 0);
+                int macCount;
+                if (_byMac.TryGetValue(macKey, out macCount))
+                {
+                    if (macCount <= 1) _byMac.Remove(macKey);
+                    else _byMac[macKey] = macCount - 1;
                 }
 
                 RelayConn peer = c.Peer;

@@ -16,7 +16,7 @@
 | Метод | Путь | Что отдаёт |
 |---|---|---|
 | GET | `/api/status` | игры → группы → ники, статистика, последние выходы, события |
-| GET | `/api/games` | каталог: 162 названия, crosslink'и, `unknownIds` |
+| GET | `/api/games` | каталог: 3900+ названий, crosslink'и, `unknownIds` |
 | GET | `/api/history?limit=50` | завершённые сессии (без MAC/IP) |
 | GET | `/api/health` | `{"ok":true,"role":"public","uptimeSec":…}` |
 | GET | `/status.xml` | легаси PRO Online XML |
@@ -56,7 +56,7 @@
   "unknownIds": [],
   "relay": { "enabled": true, "sessions": 0 },
   "config": { "theme": "light", "sound": true, "refreshMs": 2000, "timeoutSec": 25,
-              "maxUsers": 256, "dbGames": 162, "dbCrosslinks": 115,
+              "maxUsers": 256, "dbGames": 3912, "dbCrosslinks": 115,
               "role": "public", "auth": false }
 }
 ```
@@ -64,6 +64,10 @@
 `relay` в публичном ответе — только `enabled` и число сессий. В админском добавляются
 `port`, `maxSessions`, `pairs`, `pdpFrames`, `pdpDrops`, `bytesIn`, `bytesOut`
 (см. [RELAY.md](RELAY.md)).
+
+В админском ответе у каждого игрока дополнительно есть `mac`, `ip`, `idleSec`, `bytesIn/Out`,
+`pings`, `hairpin` (источник = шлюз сервера, подозрение на NAT hairpin) и `relaySessions`
+(сколько relay-сессий у его MAC; `0` при включённом релее = прямой P2P).
 
 Типы событий в публичной ленте: `join`, `leave`, `game.new`, `group.join`, `group.leave`.
 

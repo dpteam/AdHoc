@@ -39,6 +39,8 @@ namespace Dpt.AdHoc.Net
         private readonly object _banLock = new object();
         private readonly Dictionary<string, DateTime> _bans = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _failCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        private readonly object _hintLock = new object();
+        private readonly Dictionary<string, DateTime> _mixedHints = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
 
         private TcpListener _listener;
         private Thread _acceptThread;
@@ -1026,10 +1028,67 @@ namespace Dpt.AdHoc.Net
 
         // -------------------------------------------------------- maintenance
 
+        /// <summary>
+        /// PPSSPP relay is a per-client choice: if one player tunnels and another sends UDP directly,
+        /// they cannot reach each other. Detect that state and put an actionable hint on the board.
+        /// </summary>
+        private void CheckMixedTransports()
+        {
+            if (_app.Relay == null || !_app.Relay.IsRunning) return;
+
+            List<GameEntry> games;
+            lock (_state.Sync) { games = new List<GameEntry>(_state.Games.Values); }
+
+            for (int gi = 0; gi < games.Count; gi++)
+            {
+                GameEntry game = games[gi];
+                List<GroupEntry> groups;
+                lock (_state.Sync) { groups = new List<GroupEntry>(game.Groups); }
+
+                for (int g = 0; g < groups.Count; g++)
+                {
+                    GroupEntry group = groups[g];
+                    List<ClientSession> members;
+                    DateTime created;
+                    lock (_state.Sync)
+                    {
+                        members = new List<ClientSession>(group.Sessions);
+                        created = group.CreatedUtc;
+                    }
+
+                    if (members.Count < 2) continue;
+                    if ((DateTime.UtcNow - created).TotalSeconds < 10) continue;
+
+                    int relayCount = 0;
+                    for (int m = 0; m < members.Count; m++)
+                        if (_app.Relay.CountForMac(members[m].Mac) > 0) relayCount++;
+
+                    if (relayCount == 0 || relayCount == members.Count) continue;
+
+                    string key = game.Id + "|" + group.Name;
+                    lock (_hintLock)
+                    {
+                        DateTime last;
+                        if (_mixedHints.TryGetValue(key, out last) && (DateTime.UtcNow - last).TotalSeconds < 120) continue;
+                        _mixedHints[key] = DateTime.UtcNow;
+                        if (_mixedHints.Count > 200) _mixedHints.Clear();
+                    }
+
+                    string text = "Mixed transports in " + game.Name + " / " + group.Name + ": " +
+                                  relayCount + " of " + members.Count +
+                                  " players use the relay. Turn on 'Try to use server-provided packet relay' " +
+                                  "for every player (or for none) - a mixed group cannot see each other.";
+                    Log.Warn("RELAY", text);
+                    _state.AddEvent("hint", text, game.Id, game.Name, "");
+                }
+            }
+        }
+
         private void MaintenanceLoop()
         {
             DateTime lastTrim = DateTime.UtcNow;
             DateTime lastFailPurge = DateTime.UtcNow;
+            DateTime lastMixedCheck = DateTime.UtcNow;
             while (_running)
             {
                 try { Thread.Sleep(2000); }
@@ -1043,6 +1102,12 @@ namespace Dpt.AdHoc.Net
                         lastTrim = DateTime.UtcNow;
                         int removed = _state.TrimEmptyGames(_cfg.EmptyGameTtlMin);
                         if (removed > 0) Log.Debug("NET", "idle games trimmed: " + removed);
+                    }
+
+                    if ((DateTime.UtcNow - lastMixedCheck).TotalSeconds >= 10)
+                    {
+                        lastMixedCheck = DateTime.UtcNow;
+                        CheckMixedTransports();
                     }
 
                     if ((DateTime.UtcNow - lastFailPurge).TotalSeconds >= 300)

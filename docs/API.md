@@ -108,7 +108,8 @@ curl -X POST http://localhost:8080/api/games \
 
 `level`: `all|Error|Warn|Info|Debug|Verbose`. `since` — вернуть только записи с `seq > since`.
 Инкрементальный опрос: фронтенд присылает последний известный `seq`.
-Отключается `web.exposeLogs=false` (тогда 403).
+Отключается `web.exposeLogs=false` (тогда 403). Если задан `web.adminToken`, лог тоже
+требует `X-Admin-Token` (в UI токен вводится в настройках).
 
 ## GET `/api/bans`
 

@@ -144,8 +144,8 @@ var UI = (function () {
     }
   }
 
-  function getJson(url, cb, timeout) {
-    request('GET', url, null, { timeout: timeout }, cb);
+  function getJson(url, cb, timeout, token) {
+    request('GET', url, null, { timeout: timeout, token: token }, cb);
   }
 
   function postJson(url, payload, cb, token) {

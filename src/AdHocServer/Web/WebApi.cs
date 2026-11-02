@@ -48,6 +48,7 @@ namespace Dpt.AdHoc.Web
                 case "/api/logs":
                     if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
                     if (!web.Config.ExposeLogs) { web.SendJson(req, resp, 403, Err("logs are disabled by config")); return true; }
+                    if (!RequireAdmin(web, req, resp)) return true;
                     web.SendJson(req, resp, 200, BuildLogs(web, req));
                     return true;
 

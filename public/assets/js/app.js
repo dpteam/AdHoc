@@ -564,7 +564,7 @@
       }
       if (App.logLines.length > 400) App.logLines = App.logLines.slice(App.logLines.length - 400);
       renderLogs();
-    }, 8000);
+    }, 8000, App.settings.adminToken);
   }
 
   function renderLogs() {

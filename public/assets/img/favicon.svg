@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DPT.Agent AdHoc">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6f9bc9"/>
+      <stop offset="1" stop-color="#315377"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="13" fill="none" stroke="#ffffff" stroke-opacity=".35"/>
+  <circle cx="32" cy="40" r="4.2" fill="#ffffff"/>
+  <path d="M21.5 31.5a14.8 14.8 0 0 1 21 0" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" opacity=".95"/>
+  <path d="M14.5 24.5a24.5 24.5 0 0 1 35 0" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" opacity=".62"/>
+</svg>

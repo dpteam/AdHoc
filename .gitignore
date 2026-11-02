@@ -1,0 +1,31 @@
+# ---- reference material (old work, clones, dumps) ----
+refs/
+*.zip
+*.7z
+*.rar
+
+# ---- build output ----
+bin/
+obj/
+dist/
+*.pdb
+*.exe.config
+*.vshost.*
+*.user
+*.suo
+.vs/
+*.sln.docstates
+
+# ---- runtime state ----
+config.ini
+logs/
+data/*.local.json
+data/*.bak
+data/*.tmp
+public/status.xml
+
+# ---- editors / os ----
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp

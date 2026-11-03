@@ -1124,6 +1124,9 @@
   /* -------------------------------------------------------------- catalog UI */
 
   var catalogCache = null;
+  var catalogFiltered = [];
+  var catalogRendered = 0;
+  var CATALOG_PAGE = 300;
 
   function openCatalog() {
     setActiveTab('tab-catalog');
@@ -1133,7 +1136,9 @@
       '<span class="chip id" id="cat-count">…</span></div></div>' +
       '<div class="catalog-wrap"><table class="catalog-table"><thead><tr><th>ID</th><th>Название</th><th>Crosslink</th>' +
       (IS_ADMIN ? '<th></th>' : '') + '</tr></thead>' +
-      '<tbody id="cat-body"><tr><td colspan="4" class="empty small">загрузка…</td></tr></tbody></table></div>');
+      '<tbody id="cat-body"><tr><td colspan="4" class="empty small">загрузка…</td></tr></tbody></table></div>' +
+      '<div class="row" id="cat-more-row" style="display:none;justify-content:center;margin-top:8px">' +
+      '<button class="btn ghost sm" id="cat-more"><i class="fas fa-chevron-down"></i> Показать ещё</button></div>');
 
     if (IS_ADMIN) {
       html.push('<div class="section-title">Добавить / изменить</div>' +
@@ -1169,6 +1174,8 @@
       onReady: function (api) {
         var search = UI.$('#cat-search', api.body);
         if (search) search.addEventListener('input', function () { renderCatalog(search.value); });
+        var more = UI.$('#cat-more', api.body);
+        if (more) more.addEventListener('click', function () { appendCatalogPage(); });
         var saveBtn = UI.$('#cat-save', api.body);
         if (saveBtn) saveBtn.addEventListener('click', saveCatalogEntry);
 
@@ -1225,21 +1232,62 @@
     if (!tbody || !catalogCache) return;
     var q = String(filter || '').trim().toLowerCase();
     var games = catalogCache.games || [];
-    var shown = 0;
-    var html = [];
-    for (var i = 0; i < games.length && shown < 400; i++) {
+
+    catalogFiltered = [];
+    for (var i = 0; i < games.length; i++) {
       var g = games[i];
       if (q && g.id.toLowerCase().indexOf(q) < 0 && (g.name || '').toLowerCase().indexOf(q) < 0) continue;
-      shown++;
+      catalogFiltered.push(g);
+    }
+
+    var count = UI.$('#cat-count');
+    if (count) {
+      count.textContent = q
+        ? UI.fmtInt(catalogFiltered.length) + ' из ' + UI.fmtInt(games.length)
+        : UI.fmtInt(games.length) + ' игр';
+    }
+
+    catalogRendered = 0;
+    tbody.innerHTML = '';
+    if (!catalogFiltered.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty small">ничего не найдено</td></tr>';
+      updateMoreRow();
+      return;
+    }
+    appendCatalogPage();
+  }
+
+  // База большая (3900+ ID), поэтому таблица дорисовывается порциями, а не целиком.
+  function appendCatalogPage() {
+    var tbody = UI.$('#cat-body');
+    if (!tbody) return;
+    var end = Math.min(catalogFiltered.length, catalogRendered + CATALOG_PAGE);
+    if (end <= catalogRendered) { updateMoreRow(); return; }
+
+    var html = [];
+    for (var i = catalogRendered; i < end; i++) {
+      var g = catalogFiltered[i];
       html.push('<tr><td class="id">' + UI.esc(g.id) + '</td><td>' + UI.esc(g.name) + '</td>' +
         '<td class="id">' + UI.esc(g.crosslink || '') + '</td>' +
         (IS_ADMIN ? '<td class="act"><button class="mini" data-edit="' + UI.esc(g.id) + '" title="Подставить в форму"><i class="fas fa-pen-to-square"></i></button></td>' : '') +
         '</tr>');
     }
-    if (!shown) html.push('<tr><td colspan="4" class="empty small">ничего не найдено</td></tr>');
-    tbody.innerHTML = html.join('');
-    var count = UI.$('#cat-count');
-    if (count) count.textContent = UI.fmtInt(games.length) + ' игр';
+    var first = catalogRendered;
+    catalogRendered = end;
+    if (first === 0) tbody.innerHTML = html.join('');
+    else tbody.insertAdjacentHTML('beforeend', html.join(''));
+    updateMoreRow();
+  }
+
+  function updateMoreRow() {
+    var row = UI.$('#cat-more-row');
+    var btn = UI.$('#cat-more');
+    if (!row || !btn) return;
+    var left = catalogFiltered.length - catalogRendered;
+    if (left <= 0) { row.style.display = 'none'; return; }
+    row.style.display = 'flex';
+    btn.innerHTML = '<i class="fas fa-chevron-down"></i> Показать ещё ' +
+      UI.fmtInt(Math.min(left, CATALOG_PAGE)) + ' (осталось ' + UI.fmtInt(left) + ')';
   }
 
   function saveCatalogEntry() {

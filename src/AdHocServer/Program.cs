@@ -170,15 +170,16 @@ namespace Dpt.AdHoc
             {
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 Console.WriteLine();
-                Console.WriteLine("  ____  ____ _____    _         _                    _ ");
-                Console.WriteLine(" |  _ \\|  _ \\_   _|  / \\   __ _| | ___   _ __   __ _| |");
-                Console.WriteLine(" | | | | |_) || |   / _ \\ / _` | |/ / | | '_ \\ / _` | |");
-                Console.WriteLine(" | |_| |  __/ | |  / ___ \\ (_| |   <| |_| | | | (_| | |");
-                Console.WriteLine(" |____/|_|    |_| /_/   \\_\\__,_|_|\\_\\\\__|_| |_|\\__,_|_|");
+                Console.WriteLine("  ____  ____ _____     ____                            ");
+                Console.WriteLine(" |  _ \\|  _ \\_   _|   / ___|  ___ _ ____   _____ _ __  ");
+                Console.WriteLine(" | | | | |_) || |     \\___ \\ / _ \\ '__\\ \\ / / _ \\ '__| ");
+                Console.WriteLine(" | |_| |  __/ | |      ___) |  __/ |   \\ V /  __/ |    ");
+                Console.WriteLine(" |____/|_|    |_|     |____/ \\___|_|    \\_/ \\___|_|    ");
                 Console.ResetColor();
                 Console.WriteLine("  DPT.PSP AdHoc Server - PRO Online / PPSSPP compatible");
-                Console.WriteLine("  adhoc " + cfg.AdhocPort + "  |  public " + cfg.PublicPort + "  |  admin " + cfg.AdminPort +
-                                  "  |  log level " + cfg.LogLevel + "  |  .NET 4.0 / XP ready");
+                Console.WriteLine("  adhoc " + cfg.AdhocPort + " | relay " + cfg.RelayPort + " | public " + cfg.PublicPort +
+                                  " | admin " + cfg.AdminPort + " | log " + cfg.LogLevel);
+                Console.WriteLine("  .NET 4.0 / C# 4 - Windows XP SP3 ready - no external libraries");
                 Console.WriteLine();
             }
             catch { }

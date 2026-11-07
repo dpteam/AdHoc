@@ -142,6 +142,23 @@ namespace Dpt.AdHoc.Core
             }
         }
 
+        /// <summary>Restores sessions from a previous run so the board is not empty after a restart.</summary>
+        public void SeedHistory(List<HistoryEntry> previous)
+        {
+            if (previous == null || previous.Count == 0) return;
+            lock (Sync)
+            {
+                for (int i = 0; i < previous.Count; i++)
+                {
+                    HistoryEntry h = previous[i];
+                    if (h == null) continue;
+                    History.Add(h);
+                }
+                if (History.Count > _cfg.HistorySize)
+                    History.RemoveRange(0, History.Count - _cfg.HistorySize);
+            }
+        }
+
         /// <summary>Remove idle games so the board does not collect dust. Caller holds Sync.</summary>
         public int TrimEmptyGames(int ttlMinutes)
         {

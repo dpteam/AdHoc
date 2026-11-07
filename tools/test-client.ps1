@@ -185,7 +185,17 @@ $s3.Write($p, 0, $p.Length); $s3.Flush()
 $ping = Read-Packets $c3 250
 Assert ($ping.Length -eq 0) 'ping is silent' "got $($ping.Length) bytes"
 
-$c1.Close(); $c2.Close(); $c3.Close()
+# empty group name: PPSSPP sends sceNetAdhocctlCreate(NULL) as 8 zero bytes
+# (Phantasy Star Portable 2 does this) - the reference server accepts it as a group
+$c4 = Connect-Client 'PspTwo' 'ULUS10529' ([byte[]](0x02, 0x00, 0x00, 0x00, 0x00, 0x04))
+$s4 = $c4.GetStream()
+$p = New-ConnectPacket ''
+$s4.Write($p, 0, $p.Length); $s4.Flush()
+$empty = Read-Packets $c4 400
+$evEmpty = Decode-Stream $empty
+Assert (($evEmpty | Where-Object { $_ -like 'CONNECT_BSSID*' }).Count -eq 1) 'empty group name is accepted (PSP2 case)' ($evEmpty -join '; ')
+
+$c1.Close(); $c2.Close(); $c3.Close(); $c4.Close()
 Start-Sleep -Milliseconds 300
 
 Write-Host ""

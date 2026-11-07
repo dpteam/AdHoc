@@ -105,6 +105,15 @@ try {
     Assert ($raw -match '"relay"') 'public status mentions the relay' ''
     Assert ($raw -notmatch '"pdpFrames"') 'public relay info is minimal' ''
 
+    # lifetime stats (data/stats.json) - survive restarts, safe to publish
+    $life = $status.lifetime
+    Assert ($null -ne $life) 'public status exposes lifetime stats' ''
+    Assert ($life.starts -ge 1) 'lifetime counts server starts' ("starts=" + $life.starts)
+    Assert ($life.peakOnline -ge 3) 'lifetime peak online tracked' ("peak=" + $life.peakOnline)
+    Assert ($life.sessions -ge 0 -and $null -ne $life.playSeconds) 'lifetime sessions/playtime present' ''
+    Assert ($null -ne $status.topGames) 'top games list present' ''
+    Assert ($null -eq $life.logins -and $null -eq $life.bytesIn) 'public lifetime hides admin-only counters' ''
+
     Assert ((Try-Request ($PublicBase + '/api/logs')) -eq 404) 'public: logs are hidden (404)' ''
     Assert ((Try-Request ($PublicBase + '/api/kick') 'POST' '{"id":"x"}') -eq 404) 'public: kick is hidden (404)' ''
     Assert ((Try-Request ($PublicBase + '/admin.html')) -eq 404) 'public: admin shell is hidden (404)' ''

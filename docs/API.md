@@ -56,11 +56,19 @@
                "text": "Kai started playing Monster Hunter Freedom" }],
   "unknownIds": [],
   "relay": { "enabled": true, "sessions": 0 },
+  "lifetime": { "starts": 4, "firstStartUtc": "…", "peakOnline": 7, "connections": 132,
+                "sessions": 128, "playSeconds": 41250, "games": 23 },
+  "topGames": [{ "id": "ULUS10391", "name": "Monster Hunter Freedom Unite", "peak": 4,
+                 "sessions": 51, "playSeconds": 19800, "lastSeenUtc": "…" }],
   "config": { "theme": "light", "sound": true, "refreshMs": 2000, "timeoutSec": 25,
               "maxUsers": 256, "dbGames": 3912, "dbCrosslinks": 115,
               "role": "public", "auth": false }
 }
 ```
+
+`lifetime` и `topGames` берутся из `data/stats.json` и **переживают перезапуск сервера**:
+пик онлайна, число сессий, суммарное время в игре, по каждой игре пик и время. В публичном
+ответе нет `logins`, `chats`, `timeouts` и трафика — они только в админском.
 
 `relay` в публичном ответе — только `enabled` и число сессий. В админском добавляются
 `port`, `maxSessions`, `pairs`, `pdpFrames`, `pdpDrops`, `bytesIn`, `bytesOut`

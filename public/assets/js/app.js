@@ -322,14 +322,16 @@
   function renderStats(data) {
     var s = data.stats || {};
     var cfg = data.config || {};
+    var life = data.lifetime || {};
     setText('#s-online', UI.fmtInt(s.online));
     setText('#s-online-sub', 'из ' + UI.fmtInt(cfg.maxUsers || 0));
     setText('#s-games', UI.fmtInt(s.games));
     setText('#s-games-sub', UI.fmtInt(s.groups) + ' групп');
-    setText('#s-peak', UI.fmtInt(s.peak));
-    if (IS_ADMIN) setText('#s-peak-sub', 'таймаут ' + (cfg.timeoutSec || 0) + 'с');
-    setText('#s-conn', UI.fmtInt(s.connections));
-    setText('#s-conn-sub', UI.fmtInt(s.chats) + ' сообщений');
+    // peak and connection totals come from data/stats.json, so a restart does not reset them
+    setText('#s-peak', UI.fmtInt(life.peakOnline || s.peak));
+    setText('#s-peak-sub', IS_ADMIN ? ('таймаут ' + (cfg.timeoutSec || 0) + 'с') : 'за всё время');
+    setText('#s-conn', UI.fmtInt(life.connections || s.connections));
+    setText('#s-conn-sub', 'всего ' + UI.fmtInt(life.sessions || 0) + ' · ' + UI.fmtDuration(life.playSeconds || 0));
 
     if (IS_ADMIN) {
       var total = (s.bytesIn || 0) + (s.bytesOut || 0);
@@ -361,10 +363,30 @@
   function renderAbout(data) {
     var server = data.server || {};
     var relay = data.relay || {};
+    var life = data.lifetime || {};
     setText('#a-adhoc', server.adhocPort || '–');
     setText('#a-version', 'v' + (server.version || '?'));
     setText('#a-uptime', UI.fmtDuration(server.uptimeSec));
     setText('#a-relay', relay.enabled ? ('вкл · ' + UI.fmtInt(relay.sessions || 0) + ' сессий') : 'выкл');
+
+    setText('#a-peak', UI.fmtInt(life.peakOnline || 0) + ' одновременно');
+    setText('#a-sessions', UI.fmtInt(life.sessions || 0) + ' · ' + UI.fmtInt(life.starts || 0) + ' запусков');
+    setText('#a-playtime', UI.fmtDuration(life.playSeconds || 0) + ' · ' + UI.fmtInt(life.games || 0) + ' игр');
+    setText('#a-first', life.firstStartUtc ? UI.dateTime(life.firstStartUtc) : '–');
+
+    var top = data.topGames || [];
+    var host = UI.$('#a-top');
+    if (host) {
+      if (!top.length) { host.textContent = ''; }
+      else {
+        var parts = [];
+        for (var i = 0; i < top.length && i < 5; i++) {
+          parts.push(UI.esc(top[i].name) + ' — пик ' + UI.fmtInt(top[i].peak) +
+                     ', ' + UI.fmtDuration(top[i].playSeconds || 0));
+        }
+        host.innerHTML = '<b>Топ игр:</b> ' + parts.join(' · ');
+      }
+    }
   }
 
   function gamesSig(games) {
@@ -1137,8 +1159,9 @@
       '<div class="catalog-wrap"><table class="catalog-table"><thead><tr><th>ID</th><th>Название</th><th>Crosslink</th>' +
       (IS_ADMIN ? '<th></th>' : '') + '</tr></thead>' +
       '<tbody id="cat-body"><tr><td colspan="4" class="empty small">загрузка…</td></tr></tbody></table></div>' +
-      '<div class="row" id="cat-more-row" style="display:none;justify-content:center;margin-top:8px">' +
-      '<button class="btn ghost sm" id="cat-more"><i class="fas fa-chevron-down"></i> Показать ещё</button></div>');
+      '<div class="row" id="cat-more-row" style="display:none;justify-content:center;gap:8px;margin-top:8px">' +
+      '<button class="btn ghost sm" id="cat-more"><i class="fas fa-chevron-down"></i> Показать ещё</button>' +
+      '<button class="btn ghost sm" id="cat-all"><i class="fas fa-list"></i> Показать все</button></div>');
 
     if (IS_ADMIN) {
       html.push('<div class="section-title">Добавить / изменить</div>' +
@@ -1176,6 +1199,8 @@
         if (search) search.addEventListener('input', function () { renderCatalog(search.value); });
         var more = UI.$('#cat-more', api.body);
         if (more) more.addEventListener('click', function () { appendCatalogPage(); });
+        var all = UI.$('#cat-all', api.body);
+        if (all) all.addEventListener('click', function () { appendCatalogPage(true); });
         var saveBtn = UI.$('#cat-save', api.body);
         if (saveBtn) saveBtn.addEventListener('click', saveCatalogEntry);
 
@@ -1257,11 +1282,11 @@
     appendCatalogPage();
   }
 
-  // База большая (3900+ ID), поэтому таблица дорисовывается порциями, а не целиком.
-  function appendCatalogPage() {
+  // База большая (3900+ ID), поэтому таблица дорисовывается порциями; "Показать все" — сразу.
+  function appendCatalogPage(everything) {
     var tbody = UI.$('#cat-body');
     if (!tbody) return;
-    var end = Math.min(catalogFiltered.length, catalogRendered + CATALOG_PAGE);
+    var end = everything ? catalogFiltered.length : Math.min(catalogFiltered.length, catalogRendered + CATALOG_PAGE);
     if (end <= catalogRendered) { updateMoreRow(); return; }
 
     var html = [];
@@ -1282,12 +1307,14 @@
   function updateMoreRow() {
     var row = UI.$('#cat-more-row');
     var btn = UI.$('#cat-more');
+    var all = UI.$('#cat-all');
     if (!row || !btn) return;
     var left = catalogFiltered.length - catalogRendered;
     if (left <= 0) { row.style.display = 'none'; return; }
     row.style.display = 'flex';
     btn.innerHTML = '<i class="fas fa-chevron-down"></i> Показать ещё ' +
       UI.fmtInt(Math.min(left, CATALOG_PAGE)) + ' (осталось ' + UI.fmtInt(left) + ')';
+    if (all) all.innerHTML = '<i class="fas fa-list"></i> Показать все (' + UI.fmtInt(left) + ')';
   }
 
   function saveCatalogEntry() {

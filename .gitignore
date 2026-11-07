@@ -19,6 +19,8 @@ dist/
 # ---- runtime state ----
 config.ini
 logs/
+data/stats.json
+data/stats.json.tmp
 data/*.local.json
 data/*.bak
 data/*.tmp

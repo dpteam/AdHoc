@@ -81,6 +81,10 @@ namespace Dpt.AdHoc
             _app.Cfg = cfg;
             _app.Db = new GameDatabase(cfg.DataDir);
             _app.State = new ServerState(cfg);
+            _app.Stats = new StatsStore();
+            _app.Stats.Load(Path.Combine(cfg.DataDir, "stats.json"), cfg.DataDir);
+            _app.Stats.NoteStart();
+            _app.State.SeedHistory(_app.Stats.HistorySnapshot(cfg.HistorySize));
 
             _app.Adhoc = new AdhocServer(_app);
             _app.Relay = new RelayServer(_app);
@@ -247,6 +251,9 @@ namespace Dpt.AdHoc
             try { if (_app.WebAdmin != null) _app.WebAdmin.Stop(); } catch (Exception ex) { Log.Warn("APP", "admin web stop: " + ex.Message); }
             try { if (_app.Relay != null) _app.Relay.Stop(); } catch (Exception ex) { Log.Warn("APP", "relay stop: " + ex.Message); }
             try { if (_app.Adhoc != null) _app.Adhoc.Stop(); } catch (Exception ex) { Log.Warn("APP", "adhoc stop: " + ex.Message); }
+
+            try { if (_app.Stats != null && _app.Stats.Save()) Log.Info("STATS", "lifetime stats saved"); }
+            catch (Exception ex) { Log.Warn("APP", "stats save: " + ex.Message); }
 
             Log.Info("APP", "goodbye");
             Log.Shutdown();

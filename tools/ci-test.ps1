@@ -32,6 +32,7 @@ if (-not $SkipBuild) {
 if (-not (Test-Path $exe)) { Write-Host "missing $exe" -ForegroundColor Red; exit 1 }
 
 Write-Step 'starting server'
+$testStart = Get-Date
 $outLog = Join-Path $env:TEMP 'adhoc-ci-out.log'
 $errLog = Join-Path $env:TEMP 'adhoc-ci-err.log'
 $proc = Start-Process -FilePath $exe -ArgumentList @('--headless', '--level', $Level) -WorkingDirectory $bin `
@@ -69,10 +70,53 @@ try {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath
         if ($LASTEXITCODE -ne 0) { $failed += $suite.name }
     }
+
+    # lifetime stats must survive a restart (data/stats.json)
+    if ($failed.Count -eq 0) {
+        Write-Step 'suite: stats persistence'
+        $statsFile = Join-Path $bin 'data\stats.json'
+        try { if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) | Out-Null } } catch { }
+        Start-Sleep -Seconds 1
+        if (-not (Test-Path $statsFile)) {
+            Write-Host ("  [FAIL] " + $statsFile + " was not written") -ForegroundColor Red
+            $failed += 'stats-file'
+        } else {
+            $statsTime = (Get-Item $statsFile).LastWriteTime
+            if ($statsTime -lt $testStart) {
+                Write-Host ("  [FAIL] stats.json is stale (" + $statsTime + " < " + $testStart + ")") -ForegroundColor Red
+                $failed += 'stats-stale'
+            } else { Write-Host ("  [ok]   stats.json written by this run (" + $statsTime.ToString('HH:mm:ss') + ")") -ForegroundColor Green }
+            $proc2 = Start-Process -FilePath $exe -ArgumentList @('--headless', '--level', $Level) -WorkingDirectory $bin `
+                                   -WindowStyle Hidden -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+            $ok = $false
+            $deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
+            while ((Get-Date) -lt $deadline) {
+                if ($proc2.HasExited) { break }
+                try {
+                    $st = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:44501/api/status' -TimeoutSec 3
+                    if ($null -ne $st.lifetime) { $ok = $true; break }
+                } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $ok) {
+                Write-Host "  [FAIL] lifetime stats missing after restart" -ForegroundColor Red
+                $failed += 'stats-restart'
+            } else {
+                if ($st.lifetime.starts -lt 2) {
+                    Write-Host ("  [FAIL] start counter did not grow (" + $st.lifetime.starts + ")") -ForegroundColor Red
+                    $failed += 'stats-starts'
+                } else { Write-Host ("  [ok]   lifetime survived restart (starts " + $st.lifetime.starts + ")") -ForegroundColor Green }
+                if ($st.lifetime.peakOnline -lt 1) {
+                    Write-Host "  [FAIL] peak online lost after restart" -ForegroundColor Red
+                    $failed += 'stats-peak'
+                } else { Write-Host ("  [ok]   peak online kept (" + $st.lifetime.peakOnline + ")") -ForegroundColor Green }
+            }
+            try { if (-not $proc2.HasExited) { $proc2.Kill(); $proc2.WaitForExit(5000) | Out-Null } } catch { }
+        }
+    }
 }
 finally {
     Write-Step 'stopping server'
-    try { if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) | Out-Null } } catch { }
+    try { if ($proc -and -not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) | Out-Null } } catch { }
 }
 
 if ($failed.Count -gt 0) {

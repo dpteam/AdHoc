@@ -236,6 +236,29 @@ namespace Dpt.AdHoc.Core
             return s == "1" || s == "true" || s == "yes" || s == "on";
         }
 
+        public static double GetDouble(Dictionary<string, object> d, string key, double def)
+        {
+            object v = Get(d, key);
+            if (v == null) return def;
+            if (v is double) return (double)v;
+            if (v is long) return (long)v;
+            double r;
+            return double.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), NumberStyles.Float,
+                                   CultureInfo.InvariantCulture, out r) ? r : def;
+        }
+
+        /// <summary>Parses an ISO-8601 UTC timestamp as written by <see cref="Util.Iso"/>.</summary>
+        public static DateTime GetDate(Dictionary<string, object> d, string key, DateTime def)
+        {
+            string s = GetString(d, key, "");
+            if (s.Length == 0) return def;
+            DateTime parsed;
+            if (DateTime.TryParse(s, CultureInfo.InvariantCulture,
+                                  DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out parsed))
+                return parsed;
+            return def;
+        }
+
         public static string Stringify(object value)
         {
             StringBuilder sb = new StringBuilder();

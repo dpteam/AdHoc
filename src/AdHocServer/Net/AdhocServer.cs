@@ -292,6 +292,7 @@ namespace Dpt.AdHoc.Net
             }
 
             _state.SessionOpened(session);
+            _app.Stats.NoteConnection();
             Interlocked.Increment(ref _acceptedTotal);
             Log.Info("NET", "connection #" + Interlocked.Read(ref _acceptedTotal).ToString(CultureInfo.InvariantCulture) +
                             " from " + ip + ":" + session.RemotePort + " id=" + session.Id +
@@ -597,6 +598,9 @@ namespace Dpt.AdHoc.Net
                     game.RawId = rawCode;
                     game.Name = _db.DisplayName(resolved);
                     game.CreatedUtc = DateTime.UtcNow;
+                    // carry lifetime numbers over so the board does not forget previous runs
+                    game.PeakPlayers = _app.Stats.PeakOf(resolved);
+                    game.TotalPlayers = (int)Math.Min(int.MaxValue, _app.Stats.JoinsOf(resolved));
                     _state.Games[resolved] = game;
                     newGame = true;
                 }
@@ -606,6 +610,9 @@ namespace Dpt.AdHoc.Net
                 if (game.Sessions.Count > game.PeakPlayers) game.PeakPlayers = game.Sessions.Count;
                 s.Game = game;
                 _state.TotalLogins++;
+                _app.Stats.NoteLogin(resolved, game.Name);
+                _app.Stats.NoteGamePeak(resolved, game.Sessions.Count);
+                _app.Stats.NoteOnline(_state.Sessions.Count);
             }
 
             Log.Info("PROTO", "LOGIN " + s.Nickname + " mac=" + s.MacText + " ip=" + s.RemoteIp +
@@ -645,7 +652,9 @@ namespace Dpt.AdHoc.Net
         {
             string groupName = Util.Clean(Util.FixedUtf8ToString(groupBytes, 0, Packets.GroupNameSize), Packets.GroupNameSize);
 
-            if (!Util.IsAlnumAscii(groupName))
+            // An empty name is legal (PPSSPP: sceNetAdhocctlCreate(NULL) -> 8 zero bytes,
+            // used by Phantasy Star Portable 2). Only reject real garbage.
+            if (!Util.IsValidGroupName(groupName))
             {
                 Log.Warn("PROTO", s.ToString() + " requested invalid group name \"" + groupName + "\" hex=" +
                                   Util.Hex(groupBytes));
@@ -658,6 +667,7 @@ namespace Dpt.AdHoc.Net
                 return true;
             }
 
+            string groupLabel = Util.GroupDisplayName(groupName);
             List<Outbound> deliveries = new List<Outbound>();
             byte[] bssidPacket = null;
             string leftOld = null;
@@ -667,8 +677,8 @@ namespace Dpt.AdHoc.Net
                 if (s.Group != null)
                 {
                     leftOld = s.Group.Name;
-                    Log.Info("PROTO", s.ToString() + " joins " + groupName + " while still in " + leftOld +
-                                      " (auto leaving previous group)");
+                    Log.Info("PROTO", s.ToString() + " joins " + groupLabel + " while still in " +
+                                      Util.GroupDisplayName(leftOld) + " (auto leaving previous group)");
                     LeaveGroupLocked(s, deliveries);
                 }
 
@@ -687,7 +697,8 @@ namespace Dpt.AdHoc.Net
                     group.Game = game;
                     group.CreatedUtc = DateTime.UtcNow;
                     game.Groups.Add(group);
-                    Log.Info("PROTO", "group \"" + groupName + "\" created in " + game.Id);
+                    Log.Info("PROTO", "group \"" + groupLabel + "\" created in " + game.Id +
+                                      (groupName.Length == 0 ? " (client sent an empty name - normal for some games)" : ""));
                 }
 
                 byte[] founderMac = group.Founder != null ? group.Founder.Mac : s.Mac;
@@ -714,9 +725,10 @@ namespace Dpt.AdHoc.Net
             SendAll(deliveries);
             if (bssidPacket != null) s.Send(bssidPacket);
 
-            Log.Info("PROTO", s.ToString() + " joined " + s.GameId + "/" + groupName);
+            Log.Info("PROTO", s.ToString() + " joined " + s.GameId + "/" + groupLabel);
             _state.AddEvent("group.join",
-                s.Nickname + " joined group " + groupName + (leftOld != null ? " (left " + leftOld + ")" : ""),
+                s.Nickname + " joined group " + groupLabel +
+                (leftOld != null ? " (left " + Util.GroupDisplayName(leftOld) + ")" : ""),
                 s.GameId, s.GameName, s.Nickname);
             return true;
         }
@@ -737,8 +749,9 @@ namespace Dpt.AdHoc.Net
             }
 
             SendAll(deliveries);
-            Log.Info("PROTO", s.ToString() + " left group " + groupName + " (" + cause + ")");
-            _state.AddEvent("group.leave", s.Nickname + " left group " + groupName, s.GameId, s.GameName, s.Nickname);
+            string label = Util.GroupDisplayName(groupName);
+            Log.Info("PROTO", s.ToString() + " left group " + label + " (" + cause + ")");
+            _state.AddEvent("group.leave", s.Nickname + " left group " + label, s.GameId, s.GameName, s.Nickname);
         }
 
         /// <summary>Caller holds _state.Sync.</summary>
@@ -759,7 +772,7 @@ namespace Dpt.AdHoc.Net
             if (group.Sessions.Count == 0)
             {
                 game.Groups.Remove(group);
-                Log.Debug("PROTO", "group \"" + group.Name + "\" removed (empty)");
+                Log.Debug("PROTO", "group \"" + Util.GroupDisplayName(group.Name) + "\" removed (empty)");
             }
             game.LastActivityUtc = DateTime.UtcNow;
         }
@@ -784,7 +797,7 @@ namespace Dpt.AdHoc.Net
                 else if (s.Group != null)
                 {
                     // Upstream kills the session here; we stay friendly and return an empty scan.
-                    Log.Warn("PROTO", s.ToString() + " scanned while already in group " + s.Group.Name);
+                    Log.Warn("PROTO", s.ToString() + " scanned while already in group " + Util.GroupDisplayName(s.Group.Name));
                 }
             }
 
@@ -820,7 +833,8 @@ namespace Dpt.AdHoc.Net
             for (int i = 0; i < targets.Count; i++) targets[i].Send(packet);
 
             _state.TotalChats++;
-            Log.Info("PROTO", "chat " + s.Nickname + " -> " + groupName + " (" + targets.Count + "): " + text);
+            _app.Stats.NoteChat();
+            Log.Info("PROTO", "chat " + s.Nickname + " -> " + Util.GroupDisplayName(groupName) + " (" + targets.Count + "): " + text);
             _state.AddEvent("chat", s.Nickname + ": " + text, s.GameId, s.GameName, s.Nickname);
         }
 
@@ -874,6 +888,9 @@ namespace Dpt.AdHoc.Net
             if (history != null)
             {
                 _state.AddHistory(history, _cfg.HistorySize);
+                _app.Stats.NoteSessionEnd(history);
+                _app.Stats.NoteTraffic(history.BytesIn, history.BytesOut);
+                _app.Stats.NoteOnline(_state.Sessions.Count);
                 _state.AddEvent("leave", s.Nickname + " left " + history.GameName + " (" + reason + ")",
                                 history.GameId, history.GameName, s.Nickname);
             }
@@ -1082,7 +1099,7 @@ namespace Dpt.AdHoc.Net
                         if (_mixedHints.Count > 200) _mixedHints.Clear();
                     }
 
-                    string text = "Mixed transports in " + game.Name + " / " + group.Name + ": " +
+                    string text = "Mixed transports in " + game.Name + " / " + Util.GroupDisplayName(group.Name) + ": " +
                                   relayCount + " of " + members.Count +
                                   " players use the relay. Turn on 'Try to use server-provided packet relay' " +
                                   "for every player (or for none) - a mixed group cannot see each other.";
@@ -1105,6 +1122,9 @@ namespace Dpt.AdHoc.Net
 
                 try
                 {
+                    // lifetime stats: flush at most every 15 s, and only when something changed
+                    if (_app.Stats != null) _app.Stats.SaveIfDue(15);
+
                     if ((DateTime.UtcNow - lastTrim).TotalSeconds >= 30)
                     {
                         lastTrim = DateTime.UtcNow;

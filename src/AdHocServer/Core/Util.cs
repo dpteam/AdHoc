@@ -135,6 +135,23 @@ namespace Dpt.AdHoc.Core
             return true;
         }
 
+        /// <summary>
+        /// Group name check that mirrors PPSSPP's adhoc server: an empty name is legal
+        /// (sceNetAdhocctlCreate(NULL) sends eight zero bytes - Phantasy Star Portable 2
+        /// does exactly that), everything else must be A-Z a-z 0-9.
+        /// </summary>
+        public static bool IsValidGroupName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return true;
+            return IsAlnumAscii(s);
+        }
+
+        /// <summary>How a group is shown in boards and the status feed (empty = no named room).</summary>
+        public static string GroupDisplayName(string name)
+        {
+            return string.IsNullOrEmpty(name) ? "Groupless" : name;
+        }
+
         public static bool IsAllZero(byte[] data)
         {
             if (data == null) return true;

@@ -286,7 +286,7 @@ namespace Dpt.AdHoc.Web
                     {
                         GroupEntry group = g.Groups[gidx];
                         jb.BeginObject();
-                        jb.Prop("name", group.Name);
+                        jb.Prop("name", Util.GroupDisplayName(group.Name));
                         jb.Prop("players", group.Sessions.Count);
                         if (!redact) jb.Prop("host", group.Founder != null ? group.Founder.MacText : "");
                         if (!redact) jb.Prop("createdUtc", Util.Iso(group.CreatedUtc));
@@ -359,6 +359,45 @@ namespace Dpt.AdHoc.Web
             }
             jb.Prop("eventSeq", seq);
             jb.EndObject();
+
+            // lifetime numbers from data/stats.json - they survive restarts
+            StatsStore stats = app.Stats;
+            if (stats != null)
+            {
+                jb.Name("lifetime").BeginObject();
+                jb.Prop("starts", stats.Starts);
+                jb.Prop("firstStartUtc", Util.Iso(stats.FirstStartUtc));
+                jb.Prop("peakOnline", stats.PeakOnline);
+                jb.Prop("connections", stats.TotalConnections);
+                jb.Prop("sessions", stats.TotalSessions);
+                jb.Prop("playSeconds", Math.Round(stats.TotalSeconds, 0));
+                jb.Prop("games", stats.GameCount);
+                if (!redact)
+                {
+                    jb.Prop("logins", stats.TotalLogins);
+                    jb.Prop("chats", stats.TotalChats);
+                    jb.Prop("timeouts", stats.Timeouts);
+                    jb.Prop("bytesIn", stats.BytesIn);
+                    jb.Prop("bytesOut", stats.BytesOut);
+                }
+                jb.EndObject();
+
+                jb.Name("topGames").BeginArray();
+                List<StatsStore.GameTotals> top = stats.GameSnapshot(10);
+                for (int i = 0; i < top.Count; i++)
+                {
+                    StatsStore.GameTotals t = top[i];
+                    jb.BeginObject();
+                    jb.Prop("id", t.Id);
+                    jb.Prop("name", db.NameOf(t.Id).Length > 0 ? db.NameOf(t.Id) : (t.Name ?? t.Id));
+                    jb.Prop("peak", t.Peak);
+                    jb.Prop("sessions", t.Sessions);
+                    jb.Prop("playSeconds", Math.Round(t.Seconds, 0));
+                    jb.Prop("lastSeenUtc", Util.Iso(t.LastSeenUtc));
+                    jb.EndObject();
+                }
+                jb.EndArray();
+            }
 
             jb.Name("relay").BeginObject();
             if (app.Relay != null && app.Relay.IsRunning)
@@ -556,8 +595,11 @@ namespace Dpt.AdHoc.Web
                     for (int i = 0; i < g.Groups.Count; i++)
                     {
                         GroupEntry group = g.Groups[i];
+                        // PPSSPP treats "Groupless" as "players waiting", so an unnamed room
+                        // (sceNetAdhocctlCreate(NULL)) is reported there instead of as "".
+                        if (string.IsNullOrEmpty(group.Name)) continue;
                         jb.BeginObject();
-                        jb.Prop("name", group.Name ?? "");
+                        jb.Prop("name", group.Name);
                         jb.Prop("usercount", group.Sessions.Count);
                         jb.Name("users").BeginArray();
                         for (int s = 0; s < group.Sessions.Count; s++)
@@ -579,7 +621,7 @@ namespace Dpt.AdHoc.Web
                         inGroups += group.Sessions.Count;
                     }
 
-                    // players online in this game but not in any room yet
+                    // players online in this game but not in a named room yet
                     if (g.Sessions.Count > inGroups)
                     {
                         jb.BeginObject();
@@ -589,7 +631,7 @@ namespace Dpt.AdHoc.Web
                         for (int s = 0; s < g.Sessions.Count; s++)
                         {
                             ClientSession cs = g.Sessions[s];
-                            if (cs.Group != null) continue;
+                            if (cs.Group != null && !string.IsNullOrEmpty(cs.Group.Name)) continue;
                             jb.BeginObject();
                             jb.Prop("name", cs.Nickname);
                             if (withPorts)
@@ -635,6 +677,8 @@ namespace Dpt.AdHoc.Web
                     for (int i = 0; i < g.Groups.Count; i++)
                     {
                         GroupEntry group = g.Groups[i];
+                        // unnamed rooms go to the Groupless bucket below (PPSSPP convention)
+                        if (string.IsNullOrEmpty(group.Name)) continue;
                         sb.Append("\t\t<group name=\"").Append(Xml(group.Name)).Append("\" usercount=\"")
                           .Append(group.Sessions.Count.ToString(CultureInfo.InvariantCulture)).Append("\">\n");
                         for (int s = 0; s < group.Sessions.Count; s++)

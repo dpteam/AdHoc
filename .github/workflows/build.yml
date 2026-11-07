@@ -39,8 +39,9 @@ jobs:
         shell: pwsh
         run: |
           # config.ini holds a generated admin token - never ship it, the server
-          # recreates it from config.example.ini on first start
+          # recreates it from config.example.ini on first start. Same for runtime stats.
           Remove-Item bin\config.ini -ErrorAction SilentlyContinue
+          Remove-Item bin\data\stats.json -ErrorAction SilentlyContinue
           Remove-Item bin\logs\*.log -ErrorAction SilentlyContinue
           Compress-Archive -Path bin\* -DestinationPath AdHocServer-win.zip -Force
           Get-Item AdHocServer-win.zip | Select-Object Name, Length

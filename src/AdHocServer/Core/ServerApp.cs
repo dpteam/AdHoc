@@ -14,6 +14,7 @@ namespace Dpt.AdHoc.Core
         public Config Cfg;
         public GameDatabase Db;
         public ServerState State;
+        public StatsStore Stats;
         public Dpt.AdHoc.Net.AdhocServer Adhoc;
         public Dpt.AdHoc.Net.RelayServer Relay;
         public Dpt.AdHoc.Web.WebServer WebPublic;

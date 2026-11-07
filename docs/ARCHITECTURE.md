@@ -218,6 +218,7 @@ Log.Info("NET", "...")  ->  LogEntry (ring, seq)  ->  Trace.WriteLine(formatted)
 | звуки | `public/assets/js/sound.js` (пресеты — `PRESETS`) |
 | релей (PDP/PTP, лимиты) | `Net/RelayServer.cs`, `docs/RELAY.md` |
 | детект NAT hairpin | `Core/LocalNetwork.cs`, `AdhocServer.HandleLogin` |
+| статистика за всё время | `Core/StatsStore.cs`, `data/stats.json`, `AdhocServer` (Note* вызовы) |
 
 ## Тесты
 

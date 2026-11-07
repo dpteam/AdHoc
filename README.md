@@ -39,6 +39,10 @@ admin  44502   <-- админка для локалки: кик, чат, бан�
 - **16 языков** (EN/RU/UK/LT/PL/PT-BR/ES/DE/FR/IT/JA/KO/ZH/ID/TR/VI), выбор в верхней
   панели и в настройках; язык берётся из браузера, запоминается в `localStorage`.
   Как добавить свой — [docs/I18N.md](docs/I18N.md).
+- **Посещаемость**: сколько человек читает доску сейчас, за сегодня и за всё время,
+  мини-график за неделю. Считается по солёному хэшу IP+UA — ни IP, ни cookie не хранятся.
+- **Публичный чат** (гости доски ↔ игроки в игре) с капчей на 7-сегментных путях,
+  кулдауном и антиспамом; сообщения с доски уходят в игровой чат PPSSPP.
 - Никаких MAC, IP, session id, логов и кнопок модерации.
 - **Статус для списка серверов PPSSPP**: `/data.json` (и `/status.xml`) — игры, комнаты, ники,
   `game_ids` со всеми региональными алиасами. Формат и готовый JSON для заявки в PPSSPP —
@@ -100,7 +104,7 @@ tools\firewall.cmd
 `-Remove` (удалить правила). Скрипт печатает локальные IPv4, состояние сокетов и проверку
 `/api/health` — удобно сразу увидеть, что и куда прокидывать в NPM.
 
-## Reverse proxy (NGinx Proxy Manager / nginx / NAT hairpin)
+## Reverse proxy (Nginx Proxy Manager / nginx / NAT hairpin)
 
 Пробрасывайте наружу **только** публичный порт `44501`; админский `44502` держите в LAN.
 
@@ -208,6 +212,9 @@ src/AdHocServer/
   Core/GameDatabase.cs             product ID ↔ игра, crosslinks, data/games.json
   Core/ServerState.cs              игры/группы/сессии/история/события
   Core/StatsStore.cs               data/stats.json: пик/время/сессии, переживает перезапуск
+  Core/VisitStore.cs               data/visits.json: посещаемость доски (без IP)
+  Core/ChatStore.cs                чат доски: капча, кулдаун, история в data/chat.json
+  Core/Captcha.cs                  SVG-капча на 7-сегментных путях
   Core/Util.cs                     MAC/IP/hex/время/строки
   Net/Protocol.cs                  опкоды и сборка пакетов S2C
   Net/ClientSession.cs             TCP-сессия, буфер, send-lock
@@ -225,6 +232,8 @@ public/assets/js/crypto.js         SHA-256/HMAC/PBKDF2/CTR на ES5
 public/assets/js/auth.js           клиент админского API (подпись + шифрование)
 data/games.json                    база названий (создаётся/правится автоматически)
 data/stats.json                    статистика за всё время (создаётся автоматически, не в git)
+data/visits.json                   посещаемость доски (счётчики, не в git)
+data/chat.json                     последние сообщения чата (не в git)
 tools/test-client.ps1              тест протокола
 tools/test-relay.ps1               тест релея (PDP + PTP handshake, байты в обе стороны)
 tools/hold-relay.ps1               «держатель» PDP-сессии релея (ручные проверки)

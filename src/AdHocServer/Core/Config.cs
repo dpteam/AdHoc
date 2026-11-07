@@ -46,7 +46,7 @@ namespace Dpt.AdHoc.Core
         public string AdminBind = "0.0.0.0";
         public bool AdminPrivateOnly = true;
 
-        // Reverse proxy (NGinx Proxy Manager, nginx, Cloudflare tunnel, NAT hairpin).
+        // Reverse proxy (Nginx Proxy Manager, nginx, Cloudflare tunnel, NAT hairpin).
         public string PublicBasePath = "";
         public string AdminBasePath = "";
         public bool TrustProxyHeaders = true;
@@ -69,6 +69,14 @@ namespace Dpt.AdHoc.Core
         public string ServerName = "DPT.PSP AdHoc Server";
         public string ServerLocation = "";
         public string ServerDescription = "";
+
+        // ---- board visits + public chat ----
+        public bool VisitTracking = true;
+        public bool ChatEnabled = true;
+        public bool ChatToGame = true;
+        public int ChatCooldownSec = 20;
+        public int ChatMaxPer10Min = 8;
+        public int ChatMaxLength = 200;
         public string DefaultTheme = "light";
         public bool DefaultSound = true;
         public int RefreshMs = 2000;
@@ -180,6 +188,12 @@ namespace Dpt.AdHoc.Core
             c.ServerName = GetStr(kv, "web.serverName", c.ServerName);
             c.ServerLocation = GetStr(kv, "web.serverLocation", c.ServerLocation);
             c.ServerDescription = GetStr(kv, "web.serverDescription", c.ServerDescription);
+            c.VisitTracking = GetBool(kv, "web.visits", c.VisitTracking);
+            c.ChatEnabled = GetBool(kv, "web.chatEnabled", c.ChatEnabled);
+            c.ChatToGame = GetBool(kv, "web.chatToGame", c.ChatToGame);
+            c.ChatCooldownSec = GetInt(kv, "web.chatCooldownSec", c.ChatCooldownSec);
+            c.ChatMaxPer10Min = GetInt(kv, "web.chatMaxPer10Min", c.ChatMaxPer10Min);
+            c.ChatMaxLength = GetInt(kv, "web.chatMaxLength", c.ChatMaxLength);
             c.AdminToken = GetStr(kv, "web.adminToken", c.AdminToken);
             c.AdminSalt = GetStr(kv, "web.adminSalt", c.AdminSalt);
             c.DefaultTheme = GetStr(kv, "web.defaultTheme", c.DefaultTheme);
@@ -496,7 +510,7 @@ namespace Dpt.AdHoc.Core
             sb.AppendLine("; Refuse admin connections from non private addresses (extra net for port forwards)");
             sb.AppendLine("adminPrivateOnly=true");
             sb.AppendLine();
-            sb.AppendLine("; ---------- reverse proxy (NGinx Proxy Manager, nginx, NAT hairpin) ----------");
+            sb.AppendLine("; ---------- reverse proxy (Nginx Proxy Manager, nginx, NAT hairpin) ----------");
             sb.AppendLine("; Optional sub-path, e.g. /adhoc when the board is published as example.com/adhoc/");
             sb.AppendLine("publicBasePath=");
             sb.AppendLine("adminBasePath=");
@@ -529,6 +543,16 @@ namespace Dpt.AdHoc.Core
             sb.AppendLine("serverName=DPT.PSP AdHoc Server");
             sb.AppendLine("serverLocation=");
             sb.AppendLine("serverDescription=");
+            sb.AppendLine("; Board visits: today/all-time counters and how many people are reading now.");
+            sb.AppendLine("; Visitors are counted by a salted hash of IP+User-Agent; nothing is stored.");
+            sb.AppendLine("visits=true");
+            sb.AppendLine("; Public chat on the board: captcha + per-visitor cooldown.");
+            sb.AppendLine("chatEnabled=true");
+            sb.AppendLine("; Mirror board messages into the in-game chat (players see them in PPSSPP).");
+            sb.AppendLine("chatToGame=true");
+            sb.AppendLine("chatCooldownSec=20");
+            sb.AppendLine("chatMaxPer10Min=8");
+            sb.AppendLine("chatMaxLength=200");
             sb.AppendLine("defaultTheme=light");
             sb.AppendLine("defaultSound=true");
             sb.AppendLine("refreshMs=2000");

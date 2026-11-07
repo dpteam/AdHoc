@@ -219,6 +219,8 @@ Log.Info("NET", "...")  ->  LogEntry (ring, seq)  ->  Trace.WriteLine(formatted)
 | релей (PDP/PTP, лимиты) | `Net/RelayServer.cs`, `docs/RELAY.md` |
 | детект NAT hairpin | `Core/LocalNetwork.cs`, `AdhocServer.HandleLogin` |
 | статистика за всё время | `Core/StatsStore.cs`, `data/stats.json`, `AdhocServer` (Note* вызовы) |
+| посещаемость доски | `Core/VisitStore.cs`, `data/visits.json`, `POST /api/visit` |
+| публичный чат | `Core/ChatStore.cs`, `Core/Captcha.cs`, `WebApi.HandleChatSend` |
 
 ## Тесты
 

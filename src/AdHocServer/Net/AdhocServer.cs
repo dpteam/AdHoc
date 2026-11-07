@@ -834,6 +834,7 @@ namespace Dpt.AdHoc.Net
 
             _state.TotalChats++;
             _app.Stats.NoteChat();
+            if (_app.Chat != null) _app.Chat.AppendFromGame(s.Nickname, text);
             Log.Info("PROTO", "chat " + s.Nickname + " -> " + Util.GroupDisplayName(groupName) + " (" + targets.Count + "): " + text);
             _state.AddEvent("chat", s.Nickname + ": " + text, s.GameId, s.GameName, s.Nickname);
         }
@@ -1124,6 +1125,8 @@ namespace Dpt.AdHoc.Net
                 {
                     // lifetime stats: flush at most every 15 s, and only when something changed
                     if (_app.Stats != null) _app.Stats.SaveIfDue(15);
+                    if (_app.Visits != null) _app.Visits.SaveIfDue(30);
+                    if (_app.Chat != null) _app.Chat.SaveIfDue(10);
 
                     if ((DateTime.UtcNow - lastTrim).TotalSeconds >= 30)
                     {

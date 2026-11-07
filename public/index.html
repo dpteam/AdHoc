@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
-<link rel="stylesheet" href="assets/css/app.css?v=9">
+<link rel="stylesheet" href="assets/css/app.css?v=10">
 </head>
 <body>
 
@@ -116,7 +116,31 @@
           <span class="hint"><i class="fas fa-circle-info"></i> <span data-i18n="lobby.footHint">click a game to see who is in which group</span></span>
         </div>
       </section>
-
+CHAT_PANEL = '''
+      <section class="panel chat-panel" id="chat-panel" hidden>
+        <div class="panel-head">
+          <h2><i class="fas fa-comments"></i> <span data-i18n="chat.title">Chat</span></h2>
+          <div class="panel-tools">
+            <span class="chip" id="chat-hint" data-i18n-title="chat.hintTitle" title="Messages from the board and from players in game">
+              <i class="fas fa-circle-info"></i> <span data-i18n="chat.hint">board + in-game</span>
+            </span>
+          </div>
+        </div>
+        <div class="chat-log" id="chat-log" aria-live="polite">
+          <div class="empty small" data-i18n="chat.empty">no messages yet</div>
+        </div>
+        <form class="chat-form" id="chat-form" autocomplete="off">
+          <input type="text" id="chat-nick" class="chat-nick" maxlength="16" data-i18n-ph="chat.nickPh" placeholder="nick" spellcheck="false">
+          <input type="text" id="chat-text" class="chat-text" maxlength="200" data-i18n-ph="chat.textPh" placeholder="message…" spellcheck="false">
+          <button type="button" class="chat-captcha" id="chat-captcha" data-i18n-title="chat.captchaTitle" title="Click for a new code">
+            <span class="chat-captcha-svg" id="chat-captcha-svg"></span>
+          </button>
+          <input type="text" id="chat-answer" class="chat-answer" maxlength="6" inputmode="numeric" data-i18n-ph="chat.answerPh" placeholder="code" spellcheck="false">
+          <button class="btn" type="submit" id="chat-send"><i class="fas fa-paper-plane"></i><span data-i18n="chat.send">Send</span></button>
+        </form>
+        <div class="chat-status" id="chat-status"></div>
+      </section>
+'''
     </div>
 
     <aside class="col-side">
@@ -152,6 +176,15 @@
           <div class="about-row"><span data-i18n="about.playtime">Time in game</span><b id="a-playtime">–</b></div>
           <div class="about-row"><span data-i18n="about.first">First start</span><b id="a-first">–</b></div>
           <div class="about-note" id="a-top"></div>
+<div class="visit-block">
+            <div class="visit-head"><i class="fas fa-chart-simple"></i> <span data-i18n="visits.title">Visitors</span></div>
+            <div class="visit-nums">
+              <span><b id="v-online">0</b> <span data-i18n="visits.reading">reading</span></span>
+              <span><b id="v-today">0</b> <span data-i18n="visits.today">today</span></span>
+              <span><b id="v-total">0</b> <span data-i18n="visits.total">total</span></span>
+            </div>
+            <div class="visit-bars" id="v-bars" aria-hidden="true"></div>
+          </div>
           <div class="about-note" data-i18n="about.note">Public board: read-only. Logs, kick and catalog editing are available to the administrator locally.</div>
         </div>
       </section>
@@ -173,10 +206,10 @@
 <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 <div class="modal-root" id="modal-root" hidden></div>
 
-<script src="assets/js/i18n.js?v=7"></script>
+<script src="assets/js/i18n.js?v=8"></script>
 <script src="assets/js/sound.js?v=6"></script>
 <script src="assets/js/ui.js?v=7"></script>
 <script src="assets/js/auth.js?v=7"></script>
-<script src="assets/js/app.js?v=13"></script>
+<script src="assets/js/app.js?v=14"></script>
 </body>
 </html>

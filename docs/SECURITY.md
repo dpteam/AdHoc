@@ -68,7 +68,7 @@ response body (опция) = тот же конверт, заголовок X-En
 - Протокол PPSSPP не шифруется (это ограничение клиента): сервер только знакомит игроков,
   дальше идёт прямой UDP между ними.
 
-## Reverse proxy (NGinx Proxy Manager, nginx, NAT hairpin)
+## Reverse proxy (Nginx Proxy Manager, nginx, NAT hairpin)
 
 - Все клиенты приходят с одного адреса (NPM/роутер). Поэтому:
   - `X-Forwarded-For` / `X-Real-IP` учитываются **только** если непосредственный пир входит
@@ -83,7 +83,7 @@ response body (опция) = тот же конверт, заголовок X-En
 - Никаких `netsh http add urlacl`: HTTP-сервер свой, слушает `TcpListener` на `0.0.0.0`.
   Достаточно разрешить `AdHocServer.exe` в фаерволе Windows.
 
-Пример для NGinx Proxy Manager (Custom Location или Advanced):
+Пример для Nginx Proxy Manager (Custom Location или Advanced):
 
 ```nginx
 proxy_pass http://192.168.1.250:44501;

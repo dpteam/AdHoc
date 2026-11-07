@@ -21,6 +21,10 @@ config.ini
 logs/
 data/stats.json
 data/stats.json.tmp
+data/visits.json
+data/visits.json.tmp
+data/chat.json
+data/chat.json.tmp
 data/*.local.json
 data/*.bak
 data/*.tmp

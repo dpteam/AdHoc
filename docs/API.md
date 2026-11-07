@@ -21,6 +21,10 @@
 | GET | `/api/health` | `{"ok":true,"role":"public","uptimeSec":…}` |
 | GET | `/status.xml` | легаси PRO Online XML |
 | GET | `/data.json` | статус для списка серверов PPSSPP (`/status.json` — алиас), CORS `*`, см. [SERVER_LIST.md](SERVER_LIST.md) |
+| POST | `/api/visit` | «пинг» открытой доски: считает посещение, отдаёт счётчики |
+| GET | `/api/chat?since=0&limit=60` | публичный чат доски (ники, текст, источник) |
+| GET | `/api/chat/captcha` | капча: `{ id, svg, ttl }`, одноразовая |
+| POST | `/api/chat/send` | отправить сообщение: `{ nick, text, captcha, answer }` |
 | GET | `/` | публичная доска (`index.html`) |
 
 Пример ответа `/api/status` (сокращён):
@@ -69,6 +73,45 @@
 `lifetime` и `topGames` берутся из `data/stats.json` и **переживают перезапуск сервера**:
 пик онлайна, число сессий, суммарное время в игре, по каждой игре пик и время. В публичном
 ответе нет `logins`, `chats`, `timeouts` и трафика — они только в админском.
+
+### Посещаемость доски
+
+`POST /api/visit` (раз в ~45 с с каждой открытой вкладки) и блок `visits` в `/api/status`:
+
+```json
+{ "ok": true, "enabled": true, "online": 3, "peakOnline": 11,
+  "today": 27, "todayVisitors": 14, "total": 4312, "totalVisitors": 908,
+  "days": [{ "d": "2026-11-07", "v": 27, "u": 14 }] }
+```
+
+- `online` — сколько вкладок открыто прямо сейчас (окно 90 с без пинга);
+- `today` / `total` — просмотры (один посетитель = один просмотр раз в 30 минут);
+- `todayVisitors` / `totalVisitors` — уникальные за день / за всё время;
+- `days` — последние 14 дней для мини-графика.
+
+**Приватность:** посетитель = усечённый SHA-256 от `IP + User-Agent + соль сервера`.
+Хэш живёт только в памяти, на диск не пишется и наружу не отдаётся — публикуются
+только счётчики. Ни IP, ни UA, ни cookie. Хранится в `data/visits.json`
+(`web.visits=false` выключает).
+
+### Публичный чат доски
+
+```
+GET  /api/chat?since=<seq>&limit=60   -> { ok, enabled, cooldown, maxLength, messages[], lastSeq }
+GET  /api/chat/captcha                -> { ok, id, svg, ttl }
+POST /api/chat/send  {nick,text,captcha,answer}
+     -> { ok:true, sentToGame:N, message:{seq,ts,nick,text,src} }
+     -> { ok:false, error:"captcha"|"cooldown"|"flood"|"duplicate", retryAfter:N }
+```
+
+- `src` = `web` (гость доски), `game` (игрок в PPSSPP), `server` (системное);
+- сообщения из игры попадают в ленту доски автоматически, а сообщения с доски —
+  в игровой чат PPSSPP (`web.chatToGame=true`), с префиксом `[web] ник`;
+- капча: 4 цифры, нарисованные **7-сегментными путями** (в разметке нет `<text>`,
+  поэтому код нельзя выдрать парсингом SVG), одноразовая, живёт 240 с;
+- лимиты: кулдаун `web.chatCooldownSec` (20 с), не больше `web.chatMaxPer10Min` (8)
+  за 10 минут, повторы одного текста в течение 5 минут отклоняются;
+- `web.chatEnabled=false` полностью выключает чат (панель скрывается).
 
 `relay` в публичном ответе — только `enabled` и число сессий. В админском добавляются
 `port`, `maxSessions`, `pairs`, `pdpFrames`, `pdpDrops`, `bytesIn`, `bytesOut`

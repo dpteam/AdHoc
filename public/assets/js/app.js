@@ -36,7 +36,8 @@
     volume: 0.55,
     events: { join: true, leave: true, game: true, chat: true, error: true },
     refresh: 2000,
-    logLevel: 'all'
+    logLevel: 'all',
+    onlyActive: true
   };
 
   /* ------------------------------------------------------------- settings */
@@ -49,7 +50,8 @@
       volume: DEFAULTS.volume,
       events: { join: true, leave: true, game: true, chat: true, error: true },
       refresh: DEFAULTS.refresh,
-      logLevel: DEFAULTS.logLevel
+      logLevel: DEFAULTS.logLevel,
+      onlyActive: DEFAULTS.onlyActive
     };
     if (s && typeof s === 'object') {
       if (s.theme) out.theme = s.theme;
@@ -62,6 +64,7 @@
       }
       if (s.refresh !== undefined && s.refresh !== null) out.refresh = Number(s.refresh) || 0;
       if (s.logLevel) out.logLevel = s.logLevel;
+      if (typeof s.onlyActive === 'boolean') out.onlyActive = s.onlyActive;
     }
     return out;
   }
@@ -776,9 +779,7 @@
 
     var onlyActive = UI.$('#only-active');
     if (onlyActive) onlyActive.addEventListener('change', function (e) {
-      App.onlyActive = e.target.checked;
-      App.gamesSig = '';
-      if (App.status) renderGames(App.status.games || []);
+      setOnlyActive(e.target.checked, false);
       SoundFX.play('chip');
     });
 
@@ -1022,6 +1023,10 @@
     }
     html.push('</select></div>');
 
+    html.push('<div class="field"><label class="check"><input type="checkbox" id="st-only-active"' +
+      (s.onlyActive !== false ? ' checked' : '') + '><span></span>' +
+      I18N.t('settings.onlyActive') + '</label></div>');
+
     if (IS_ADMIN) {
       html.push('<div class="section-title">' + I18N.t('role.admin') + '</div>');
       html.push('<div class="field"><label>' + I18N.t('settings.logLevel') + '</label><select id="st-loglevel">' +
@@ -1087,6 +1092,12 @@
       openSettings();
     });
 
+    var onlyActiveBox = UI.$('#st-only-active', root);
+    if (onlyActiveBox) onlyActiveBox.addEventListener('change', function () {
+      setOnlyActive(this.checked, true);
+      SoundFX.play('chip');
+    });
+
     var sound = UI.$('#st-sound', root);
     if (sound) sound.addEventListener('change', function () {
       App.settings.sound = sound.checked;
@@ -1096,8 +1107,7 @@
     });
 
     var vol = UI.$('#st-volume', root);
-    var volVal = UI.$('#st-volume-val', root);
-    if (vol) {
+    var volVal = UI.$('#st-volume-val', root);    if (vol) {
       vol.addEventListener('input', function () {
         App.settings.volume = (Number(vol.value) || 0) / 100;
         SoundFX.setVolume(App.settings.volume);
@@ -1383,6 +1393,261 @@
     });
   }
 
+  /* -------------------------------------------------------------- only-active */
+
+  /** Remembers "with players only" both in the toolbar and in the settings dialog. */
+  function setOnlyActive(value, fromSettings) {
+    App.onlyActive = !!value;
+    App.settings.onlyActive = App.onlyActive;
+    saveSettings();
+
+    var box = UI.$('#only-active');
+    if (box) box.checked = App.onlyActive;
+    var sbox = UI.$('#st-only-active');
+    if (sbox) sbox.checked = App.onlyActive;
+
+    App.gamesSig = '';
+    if (App.status) renderGames(App.status.games || []);
+    if (!fromSettings) return;
+  }
+
+  /* ----------------------------------------------------------------- visits */
+
+  var visitTimer = null;
+  var visitsOff = false;
+
+  function visitPing() {
+    if (visitsOff) return;
+    API.post('/api/visit', {}, function (err, data) {
+      if (err) { return; }
+      if (!data || data.enabled === false) { visitsOff = true; return; }
+      renderVisits(data);
+    }, 8000);
+  }
+
+  function renderVisits(v) {
+    if (!v) return;
+    setText('#v-online', UI.fmtInt(v.online));
+    setText('#v-today', UI.fmtInt(v.today));
+    setText('#v-total', UI.fmtInt(v.total));
+
+    var host = UI.$('#v-bars');
+    if (!host) return;
+    var days = v.days || [];
+    if (!days.length) { host.innerHTML = ''; return; }
+
+    var tail = days.slice(Math.max(0, days.length - 7));
+    var max = 1;
+    for (var i = 0; i < tail.length; i++) if ((tail[i].v || 0) > max) max = tail[i].v;
+
+    var html = [];
+    for (var j = 0; j < tail.length; j++) {
+      var d = tail[j];
+      var h = Math.max(2, Math.round((d.v || 0) / max * 24));
+      html.push('<i style="height:' + h + 'px" title="' + UI.esc(d.d) + ': ' + UI.fmtInt(d.v) +
+                ' / ' + UI.fmtInt(d.u) + '"></i>');
+    }
+    host.innerHTML = html.join('');
+  }
+
+  /* ------------------------------------------------------------------- chat */
+
+  var chat = {
+    lastSeq: 0,
+    items: [],
+    captchaId: '',
+    cooldownSec: 20,
+    cooldownUntil: 0,
+    timer: null,
+    tickTimer: null,
+    busy: false
+  };
+
+  function chatStart() {
+    var panel = UI.$('#chat-panel');
+    if (!panel) return;
+
+    var nick = UI.$('#chat-nick');
+    if (nick) {
+      nick.value = UI.read('dpt.chatNick', '') || '';
+      nick.addEventListener('change', function () { UI.store('dpt.chatNick', nick.value); });
+    }
+
+    var form = UI.$('#chat-form');
+    if (form) form.addEventListener('submit', function (e) { e.preventDefault(); chatSend(); });
+
+    var cap = UI.$('#chat-captcha');
+    if (cap) cap.addEventListener('click', function () { chatLoadCaptcha(); });
+
+    chatPoll(true);
+    if (!chat.timer) chat.timer = setInterval(function () { chatPoll(false); }, 4000);
+    if (!chat.tickTimer) chat.tickTimer = setInterval(chatTick, 500);
+  }
+
+  function chatPoll(initial) {
+    var since = initial ? 0 : chat.lastSeq;
+    API.get('/api/chat?since=' + since + '&limit=60', function (err, data) {
+      if (err || !data) return;
+      var panel = UI.$('#chat-panel');
+      if (data.enabled === false) { if (panel) panel.hidden = true; return; }
+      if (panel) panel.hidden = false;
+
+      chat.cooldownSec = Number(data.cooldown) || 20;
+
+      var list = data.messages || [];
+      if (initial) {
+        chat.items = list;
+        if (list.length) chat.lastSeq = list[list.length - 1].seq;
+        chatRender(true);
+        chatLoadCaptcha();
+        return;
+      }
+      if (!list.length) return;
+
+      var fresh = 0;
+      for (var i = 0; i < list.length; i++) {
+        var m = list[i];
+        if (m.seq <= chat.lastSeq) continue;
+        chat.items.push(m);
+        chat.lastSeq = m.seq;
+        fresh++;
+      }
+      if (!fresh) return;
+      if (chat.items.length > 120) chat.items = chat.items.slice(chat.items.length - 120);
+      chatRender(false);
+
+      var last = chat.items[chat.items.length - 1];
+      if (last && last.nick !== (UI.$('#chat-nick') || {}).value && App.settings.events.chat) {
+        SoundFX.play('chat');
+      }
+    }, 8000);
+  }
+
+  function chatRender(initial) {
+    var host = UI.$('#chat-log');
+    if (!host) return;
+    if (!chat.items.length) {
+      host.innerHTML = '<div class="empty small">' + I18N.t('chat.empty') + '</div>';
+      return;
+    }
+
+    var nearBottom = initial || (host.scrollHeight - host.scrollTop - host.clientHeight) < 40;
+    var html = [];
+    for (var i = 0; i < chat.items.length; i++) {
+      var m = chat.items[i];
+      var src = m.src === 'game' ? 'src-game' : (m.src === 'server' ? 'src-game' : 'src-web');
+      html.push('<div class="chat-line ' + src + '">' +
+        '<span class="when">' + UI.clock(m.ts) + '</span>' +
+        '<span class="who">' + UI.esc(m.nick) + '</span>' +
+        '<span class="what">' + UI.esc(m.text) + '</span></div>');
+    }
+    host.innerHTML = html.join('');
+    if (nearBottom) host.scrollTop = host.scrollHeight;
+  }
+
+  function chatLoadCaptcha() {
+    var svgHost = UI.$('#chat-captcha-svg');
+    if (!svgHost) return;
+    API.get('/api/chat/captcha', function (err, data) {
+      if (err || !data || !data.svg) { svgHost.innerHTML = ''; return; }
+      chat.captchaId = data.id;
+      svgHost.innerHTML = data.svg;
+    }, 8000);
+  }
+
+  function chatStatus(text, kind) {
+    var el = UI.$('#chat-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'chat-status' + (kind ? ' ' + kind : '');
+  }
+
+  function chatSend() {
+    if (chat.busy) return;
+    var textEl = UI.$('#chat-text');
+    var answerEl = UI.$('#chat-answer');
+    var nickEl = UI.$('#chat-nick');
+    if (!textEl || !answerEl) return;
+
+    var text = (textEl.value || '').trim();
+    if (!text) { chatStatus(I18N.t('chat.needText'), 'err'); return; }
+    if (chat.cooldownUntil > Date.now()) {
+      chatStatus(I18N.t('chat.wait', Math.ceil((chat.cooldownUntil - Date.now()) / 1000)), 'err');
+      return;
+    }
+
+    var nick = (nickEl && nickEl.value || '').trim();
+    if (nick) UI.store('dpt.chatNick', nick);
+
+    chat.busy = true;
+    var btn = UI.$('#chat-send');
+    if (btn) btn.disabled = true;
+
+    API.post('/api/chat/send', {
+      nick: nick,
+      text: text,
+      captcha: chat.captchaId,
+      answer: (answerEl.value || '').trim()
+    }, function (err, data) {
+      chat.busy = false;
+      if (btn) btn.disabled = false;
+
+      if (err) { chatStatus((err.message || I18N.t('chat.failed')), 'err'); chatLoadCaptcha(); return; }
+      if (!data) { chatStatus(I18N.t('chat.failed'), 'err'); return; }
+
+      if (!data.ok) {
+        var wait = Number(data.retryAfter) || 0;
+        if (data.error === 'captcha') {
+          chatStatus(I18N.t('chat.wrongCode'), 'err');
+          chatLoadCaptcha();
+          if (answerEl) answerEl.value = '';
+        } else if (data.error === 'cooldown') {
+          chat.cooldownUntil = Date.now() + wait * 1000;
+          chatStatus(I18N.t('chat.wait', wait), 'err');
+        } else if (data.error === 'flood') {
+          chat.cooldownUntil = Date.now() + wait * 1000;
+          chatStatus(I18N.t('chat.flood'), 'err');
+        } else if (data.error === 'duplicate') {
+          chatStatus(I18N.t('chat.duplicate'), 'err');
+        } else {
+          chatStatus(I18N.t('chat.failed'), 'err');
+        }
+        return;
+      }
+
+      var m = data.message;
+      if (m) {
+        if (m.seq > chat.lastSeq) chat.lastSeq = m.seq;
+        chat.items.push(m);
+        if (chat.items.length > 120) chat.items = chat.items.slice(chat.items.length - 120);
+        chatRender(false);
+      }
+      textEl.value = '';
+      if (answerEl) answerEl.value = '';
+      chatLoadCaptcha();
+      chat.cooldownUntil = Date.now() + chat.cooldownSec * 1000;
+      chatStatus(data.sentToGame > 0
+        ? I18N.t('chat.sentGame', data.sentToGame)
+        : I18N.t('chat.sent'), 'ok');
+      chatTick();
+    }, 10000);
+  }
+
+  function chatTick() {
+    var btn = UI.$('#chat-send');
+    if (!btn) return;
+    var left = Math.ceil((chat.cooldownUntil - Date.now()) / 1000);
+    if (left > 0) {
+      btn.disabled = true;
+      var label = btn.querySelector('span');
+      if (label) label.textContent = I18N.t('chat.waitShort', left);
+    } else {
+      if (!chat.busy) btn.disabled = false;
+      var l2 = btn.querySelector('span');
+      if (l2) l2.textContent = I18N.t('chat.send');
+    }
+  }
+
   /* -------------------------------------------------------------------- init */
 
   /**
@@ -1425,8 +1690,17 @@
     SoundFX.setVolume(App.settings.volume);
     SoundFX.setEvents(App.settings.events);
 
+    // "with players only" is remembered between visits
+    App.onlyActive = App.settings.onlyActive !== false;
+    var onlyBox = UI.$('#only-active');
+    if (onlyBox) onlyBox.checked = App.onlyActive;
+
     bind();
     poll();
+
+    chatStart();
+    visitPing();
+    if (!visitTimer) visitTimer = setInterval(visitPing, 45000);
 
     if (IS_ADMIN) {
       App.logTimer = setInterval(logTick, 2600);

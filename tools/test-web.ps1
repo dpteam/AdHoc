@@ -147,6 +147,61 @@ try {
     Assert ($hist.ok) 'public history' ''
     Assert (($hist.history | Measure-Object).Count -ge 0) 'history redacted' ''
 
+    # ---------------------------------------------------------- board visits
+    $visit = Invoke-RestMethod -UseBasicParsing -Uri ($PublicBase + '/api/visit') -Method POST `
+                               -Body '{}' -ContentType 'application/json' -TimeoutSec 15
+    Assert ($visit.ok -eq $true) 'visit heartbeat accepted' ''
+    Assert ($null -ne $visit.online -and $visit.online -ge 1) 'visit returns live readers' ("online=" + $visit.online)
+    Assert ($visit.today -ge 1) 'visits counted for today' ("today=" + $visit.today)
+    Assert ($visit.total -ge 1) 'visits counted all-time' ("total=" + $visit.total)
+    Assert ($null -ne $visit.days) 'visits include a per-day series' ''
+    Assert ($status.visits -ne $null) 'public status exposes visit counters' ''
+    Assert ($raw -notmatch '"ip"') 'visits never leak addresses' ''
+
+    # --------------------------------------------------------------- public chat
+    $chatLog = Get-Json ($PublicBase + '/api/chat?since=0&limit=20')
+    Assert ($chatLog.ok -eq $true) 'chat log readable' ''
+    Assert ($chatLog.enabled -eq $true) 'chat is enabled' ''
+    Assert ($chatLog.cooldown -ge 1) 'chat advertises a cooldown' ("cooldown=" + $chatLog.cooldown)
+    Assert ($null -ne $chatLog.messages) 'chat returns a message list' ''
+
+    $cap = Get-Json ($PublicBase + '/api/chat/captcha')
+    Assert ($cap.ok -eq $true -and $cap.id.Length -ge 10) 'captcha issued' ("id=" + $cap.id)
+    Assert ($cap.svg -like '<svg*') 'captcha is inline SVG' ''
+    Assert ($cap.svg -notmatch '<text') 'captcha digits are not plain text' ''
+
+    $badSend = Invoke-RestMethod -UseBasicParsing -Uri ($PublicBase + '/api/chat/send') -Method POST `
+                                 -Body '{"nick":"Probe","text":"nope","captcha":"deadbeef","answer":"0000"}' `
+                                 -ContentType 'application/json' -TimeoutSec 15
+    Assert ($badSend.ok -eq $false -and $badSend.error -eq 'captcha') 'wrong captcha is rejected' ("error=" + $badSend.error)
+
+    # the answer only exists server-side; Debug logs let the test solve it
+    $code = $null
+    $logs = Get-ChildItem (Join-Path $root 'bin\logs') -Filter 'adhoc-*.log' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($logs) {
+        $hit = Select-String -Path $logs.FullName -Pattern ('captcha ' + $cap.id + ' = (\d+)') -Encoding UTF8 |
+               Select-Object -Last 1
+        if ($hit) { $code = $hit.Matches[0].Groups[1].Value }
+    }
+    if ($code) {
+        $body = '{"nick":"Probe","text":"hello from the test suite","captcha":"' + $cap.id + '","answer":"' + $code + '"}'
+        $goodSend = Invoke-RestMethod -UseBasicParsing -Uri ($PublicBase + '/api/chat/send') -Method POST `
+                                      -Body $body -ContentType 'application/json' -TimeoutSec 15
+        Assert ($goodSend.ok -eq $true) 'solved captcha posts the message' ("error=" + $goodSend.error)
+        Assert ($goodSend.message.text -eq 'hello from the test suite') 'message text preserved' ''
+
+        $replay = Invoke-RestMethod -UseBasicParsing -Uri ($PublicBase + '/api/chat/send') -Method POST `
+                                    -Body $body -ContentType 'application/json' -TimeoutSec 15
+        Assert ($replay.ok -eq $false) 'captcha is single-use' ("error=" + $replay.error)
+        Assert ($replay.error -eq 'cooldown' -or $replay.error -eq 'captcha') 'replay blocked by cooldown/captcha' ("error=" + $replay.error)
+
+        $after = Get-Json ($PublicBase + '/api/chat?since=0&limit=20')
+        Assert (@($after.messages | Where-Object { $_.text -eq 'hello from the test suite' }).Count -eq 1) 'message is in the log' ''
+    } else {
+        Write-Host "  [skip] captcha solving (server log is not at Debug level)" -ForegroundColor Yellow
+    }
+
     $index = (Get-Status ($PublicBase + '/')).Content
     Assert ($index -like '*DPT.PSP*' -and $index -like '*data-role="public"*') 'public index served' ''
 

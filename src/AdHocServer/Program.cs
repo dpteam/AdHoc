@@ -86,6 +86,16 @@ namespace Dpt.AdHoc
             _app.Stats.NoteStart();
             _app.State.SeedHistory(_app.Stats.HistorySnapshot(cfg.HistorySize));
 
+            _app.Visits = new VisitStore();
+            _app.Visits.Configure(Path.Combine(cfg.DataDir, "visits.json"), cfg.AdminSalt, cfg.VisitTracking);
+            _app.Visits.Load(Path.Combine(cfg.DataDir, "visits.json"));
+
+            _app.Chat = new ChatStore();
+            _app.Chat.CooldownSec = cfg.ChatCooldownSec;
+            _app.Chat.MaxPerWindow = cfg.ChatMaxPer10Min;
+            _app.Chat.MaxLength = cfg.ChatMaxLength;
+            _app.Chat.Load(Path.Combine(cfg.DataDir, "chat.json"));
+
             _app.Adhoc = new AdhocServer(_app);
             _app.Relay = new RelayServer(_app);
             _app.WebPublic = new WebServer(_app, WebRole.Public);
@@ -254,6 +264,9 @@ namespace Dpt.AdHoc
 
             try { if (_app.Stats != null && _app.Stats.Save()) Log.Info("STATS", "lifetime stats saved"); }
             catch (Exception ex) { Log.Warn("APP", "stats save: " + ex.Message); }
+
+            try { if (_app.Visits != null) _app.Visits.Save(); } catch (Exception ex) { Log.Warn("APP", "visits save: " + ex.Message); }
+            try { if (_app.Chat != null) _app.Chat.Save(); } catch (Exception ex) { Log.Warn("APP", "chat save: " + ex.Message); }
 
             Log.Info("APP", "goodbye");
             Log.Shutdown();

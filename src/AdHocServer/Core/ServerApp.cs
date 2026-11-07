@@ -15,6 +15,8 @@ namespace Dpt.AdHoc.Core
         public GameDatabase Db;
         public ServerState State;
         public StatsStore Stats;
+        public VisitStore Visits;
+        public ChatStore Chat;
         public Dpt.AdHoc.Net.AdhocServer Adhoc;
         public Dpt.AdHoc.Net.RelayServer Relay;
         public Dpt.AdHoc.Web.WebServer WebPublic;

@@ -65,6 +65,26 @@ namespace Dpt.AdHoc.Web
                     web.SendJson(req, resp, 200, BuildHistory(web, req, true));
                     return true;
 
+                case "/api/visit":
+                    if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    HandleVisit(web, req, resp);
+                    return true;
+
+                case "/api/chat":
+                    if (!isGet) return false;
+                    web.SendJson(req, resp, 200, BuildChatLog(web, req, true));
+                    return true;
+
+                case "/api/chat/send":
+                    if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    HandleChatSend(web, req, resp);
+                    return true;
+
+                case "/api/chat/captcha":
+                    if (!isGet) return false;
+                    HandleCaptcha(web, req, resp);
+                    return true;
+
                 default:
                     return false;
             }
@@ -139,6 +159,21 @@ namespace Dpt.AdHoc.Web
                     web.SendJson(req, resp, 200, BuildHistory(web, req, false));
                     return true;
 
+                case "/api/visit":
+                    if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    HandleVisit(web, req, resp);
+                    return true;
+
+                case "/api/chat/send":
+                    if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    HandleChatSend(web, req, resp);
+                    return true;
+
+                case "/api/chat/captcha":
+                    if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
+                    HandleCaptcha(web, req, resp);
+                    return true;
+
                 case "/api/logs":
                     if (!isGet) { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
                     if (!web.Config.ExposeLogs) { web.SendJson(req, resp, 403, Err("logs are disabled by config")); return true; }
@@ -164,8 +199,9 @@ namespace Dpt.AdHoc.Web
                     return true;
 
                 case "/api/chat":
-                    if (method != "POST") { web.SendJson(req, resp, 405, Err("method not allowed")); return true; }
-                    HandleChat(web, req, resp);
+                    if (isGet) { web.SendJson(req, resp, 200, BuildChatLog(web, req, false)); return true; }
+                    if (method == "POST") { HandleChat(web, req, resp); return true; }
+                    web.SendJson(req, resp, 405, Err("method not allowed"));
                     return true;
 
                 case "/api/reload":
@@ -359,6 +395,31 @@ namespace Dpt.AdHoc.Web
             }
             jb.Prop("eventSeq", seq);
             jb.EndObject();
+
+            // board visits: same numbers the visitor counter shows
+            VisitStore vstore = app.Visits;
+            if (vstore != null && cfg.VisitTracking)
+            {
+                VisitStore.Snapshot vs = vstore.Current();
+                jb.Name("visits").BeginObject();
+                jb.Prop("online", vs.Online);
+                jb.Prop("peakOnline", vs.PeakOnline);
+                jb.Prop("today", vs.TodayViews);
+                jb.Prop("todayVisitors", vs.TodayVisitors);
+                jb.Prop("total", vs.TotalViews);
+                jb.Prop("totalVisitors", vs.TotalVisitors);
+                jb.Name("days").BeginArray();
+                for (int i = 0; i < vs.Days.Count; i++)
+                {
+                    jb.BeginObject();
+                    jb.Prop("d", vs.Days[i].Date);
+                    jb.Prop("v", vs.Days[i].Views);
+                    jb.Prop("u", vs.Days[i].Visitors);
+                    jb.EndObject();
+                }
+                jb.EndArray();
+                jb.EndObject();
+            }
 
             // lifetime numbers from data/stats.json - they survive restarts
             StatsStore stats = app.Stats;
@@ -988,6 +1049,177 @@ namespace Dpt.AdHoc.Web
                 return null;
             }
             return req.BodyText();
+        }
+
+        // ------------------------------------------------- visits + public chat
+
+        /// <summary>Heartbeat from a board tab: counts visits and returns the counters.</summary>
+        private static void HandleVisit(WebServer web, HttpRequest req, HttpResponse resp)
+        {
+            VisitStore visits = web.App.Visits;
+            if (visits == null || !web.Config.VisitTracking)
+            {
+                web.SendJson(req, resp, 200, "{\"ok\":true,\"enabled\":false}");
+                return;
+            }
+
+            string ip = web.EffectiveClientIp(req);
+            string ua = req.Header("User-Agent") ?? "";
+            VisitStore.Snapshot s = visits.Touch(ip, ua);
+            web.SendJson(req, resp, 200, BuildVisitJson(s, true));
+        }
+
+        private static string BuildVisitJson(VisitStore.Snapshot s, bool includeDays)
+        {
+            JsonBuilder jb = new JsonBuilder(512);
+            jb.BeginObject();
+            jb.Prop("ok", true);
+            jb.Prop("enabled", true);
+            jb.Prop("online", s.Online);
+            jb.Prop("peakOnline", s.PeakOnline);
+            jb.Prop("today", s.TodayViews);
+            jb.Prop("todayVisitors", s.TodayVisitors);
+            jb.Prop("total", s.TotalViews);
+            jb.Prop("totalVisitors", s.TotalVisitors);
+            if (includeDays)
+            {
+                jb.Name("days").BeginArray();
+                for (int i = 0; i < s.Days.Count; i++)
+                {
+                    jb.BeginObject();
+                    jb.Prop("d", s.Days[i].Date);
+                    jb.Prop("v", s.Days[i].Views);
+                    jb.Prop("u", s.Days[i].Visitors);
+                    jb.EndObject();
+                }
+                jb.EndArray();
+            }
+            jb.EndObject();
+            return jb.ToString();
+        }
+
+        /// <summary>Chat log, public: nicks and text only (no IPs, no captcha ids).</summary>
+        private static string BuildChatLog(WebServer web, HttpRequest req, bool redact)
+        {
+            ChatStore chat = web.App.Chat;
+            long since = 0;
+            long.TryParse(req.QueryString("since") ?? "0", out since);
+            int limit = 60;
+            int parsed;
+            if (int.TryParse(req.QueryString("limit") ?? "", out parsed)) limit = Config.Clamp(parsed, 1, 200);
+
+            JsonBuilder jb = new JsonBuilder(1024);
+            jb.BeginObject();
+            jb.Prop("ok", true);
+            jb.Prop("enabled", web.Config.ChatEnabled);
+            jb.Prop("cooldown", web.Config.ChatCooldownSec);
+            jb.Prop("maxLength", web.Config.ChatMaxLength);
+            if (chat != null)
+            {
+                List<ChatStore.Message> list = chat.Since(since, limit);
+                jb.Name("messages").BeginArray();
+                for (int i = 0; i < list.Count; i++)
+                {
+                    ChatStore.Message m = list[i];
+                    jb.BeginObject();
+                    jb.Prop("seq", m.Seq);
+                    jb.Prop("ts", Util.Iso(m.Utc));
+                    jb.Prop("nick", m.Nick);
+                    jb.Prop("text", m.Text);
+                    jb.Prop("src", m.Source);
+                    jb.EndObject();
+                }
+                jb.EndArray();
+                jb.Prop("lastSeq", chat.LastSeq);
+            }
+            else
+            {
+                jb.Name("messages").BeginArray();
+                jb.EndArray();
+                jb.Prop("lastSeq", 0);
+            }
+            jb.EndObject();
+            return jb.ToString();
+        }
+
+        private static void HandleCaptcha(WebServer web, HttpRequest req, HttpResponse resp)
+        {
+            if (!web.Config.ChatEnabled) { web.SendJson(req, resp, 403, Err("chat is disabled by config")); return; }
+            ChatStore chat = web.App.Chat;
+            if (chat == null) { web.SendJson(req, resp, 503, Err("chat unavailable")); return; }
+
+            ChatStore.Challenge c = chat.NewChallenge();
+            JsonBuilder jb = new JsonBuilder(1024);
+            jb.BeginObject();
+            jb.Prop("ok", true);
+            jb.Prop("id", c.Id);
+            jb.Prop("svg", chat.Svg(c));
+            jb.Prop("ttl", chat.CaptchaTtlSec);
+            jb.EndObject();
+            web.SendJson(req, resp, 200, jb.ToString());
+        }
+
+        private static void HandleChatSend(WebServer web, HttpRequest req, HttpResponse resp)
+        {
+            if (!web.Config.ChatEnabled) { web.SendJson(req, resp, 403, Err("chat is disabled by config")); return; }
+            ChatStore chat = web.App.Chat;
+            VisitStore visits = web.App.Visits;
+            if (chat == null) { web.SendJson(req, resp, 503, Err("chat unavailable")); return; }
+
+            string body = ReadBody(web, req, resp, 8 * 1024);
+            if (body == null) return;
+
+            Dictionary<string, object> request;
+            try { request = Json.ParseObject(body); }
+            catch (Exception ex) { web.SendJson(req, resp, 400, Err("invalid json: " + ex.Message)); return; }
+
+            string nick = Json.GetString(request, "nick", "");
+            string text = Json.GetString(request, "text", "");
+            string captchaId = Json.GetString(request, "captcha", "");
+            string answer = Json.GetString(request, "answer", "");
+
+            string ip = web.EffectiveClientIp(req);
+            string visitor = visits != null
+                ? visits.Identity(ip, req.Header("User-Agent") ?? "")
+                : chat.SanitizeNick(ip);
+
+            ChatStore.PostResult result = chat.Post(visitor, nick, text, captchaId, answer,
+                                                    web.Role == WebRole.Admin);
+
+            JsonBuilder jb = new JsonBuilder(512);
+            jb.BeginObject();
+            if (!result.Ok)
+            {
+                jb.Prop("ok", false);
+                jb.Prop("error", result.Error);
+                if (result.RetryAfterSec > 0) jb.Prop("retryAfter", result.RetryAfterSec);
+                jb.EndObject();
+                web.SendJson(req, resp, 200, jb.ToString());
+                return;
+            }
+
+            ChatStore.Message m = result.Message;
+            int sentToGame = 0;
+            if (web.Config.ChatToGame && web.App.Adhoc != null)
+            {
+                string sender = ("[web] " + m.Nick);
+                if (sender.Length > 31) sender = sender.Substring(0, 31);
+                try { sentToGame = web.App.Adhoc.BroadcastChat(m.Text, sender); } catch { }
+            }
+
+            Log.Info("CHAT", "web message from " + m.Nick + " (in-game " + sentToGame + "): " + m.Text);
+
+            jb.Prop("ok", true);
+            jb.Prop("sentToGame", sentToGame);
+            jb.Name("message").BeginObject();
+            jb.Prop("seq", m.Seq);
+            jb.Prop("ts", Util.Iso(m.Utc));
+            jb.Prop("nick", m.Nick);
+            jb.Prop("text", m.Text);
+            jb.Prop("src", m.Source);
+            jb.EndObject();
+            jb.EndObject();
+            web.SendJson(req, resp, 200, jb.ToString());
         }
     }
 }

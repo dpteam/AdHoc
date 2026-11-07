@@ -147,6 +147,18 @@ try {
     Assert ($hist.ok) 'public history' ''
     Assert (($hist.history | Measure-Object).Count -ge 0) 'history redacted' ''
 
+    # ------------------------------------------------- Ad Hoc support in catalog
+    $cat = Get-Json ($PublicBase + '/api/games')
+    Assert ($cat.adhoc -ge 1000) 'catalog reports Ad Hoc coverage' ("adhoc=" + $cat.adhoc)
+    $byId = @{}
+    foreach ($g in $cat.games) { $byId[$g.id] = $g }
+
+    Assert ($byId['ULUS10084'].adhoc -eq '2-4') 'Monster Hunter Freedom is Ad Hoc' ("val=" + $byId['ULUS10084'].adhoc)
+    Assert ($byId['ULUS10529'].adhoc -eq '2-4') 'PSP2 is Ad Hoc despite the upstream "-"' ("val=" + $byId['ULUS10529'].adhoc)
+    Assert ($byId['ULUS10466'].adhoc -eq '2') 'Tekken 6 is Ad Hoc (curated)' ("val=" + $byId['ULUS10466'].adhoc)
+    Assert ($null -eq $byId['ULES00806'].adhoc) 'gameshare-only title stays unknown' ("val=" + $byId['ULES00806'].adhoc)
+    Assert ($byId['ULUS10160'].adhoc -eq '2-6') 'GTA Vice City Stories is Ad Hoc' ("val=" + $byId['ULUS10160'].adhoc)
+
     # ---------------------------------------------------------- board visits
     $visit = Invoke-RestMethod -UseBasicParsing -Uri ($PublicBase + '/api/visit') -Method POST `
                                -Body '{}' -ContentType 'application/json' -TimeoutSec 15

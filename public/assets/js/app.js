@@ -1175,6 +1175,7 @@
   var catalogCache = null;
   var catalogFiltered = [];
   var catalogRendered = 0;
+  var catalogOnlyAdhoc = false;
   var CATALOG_PAGE = 300;
 
   function openCatalog() {
@@ -1182,10 +1183,13 @@
     var html = [];
     html.push('<div class="field"><div class="row">' +
       '<input type="text" id="cat-search" placeholder="' + I18N.t('catalog.search') + '">' +
-      '<span class="chip id" id="cat-count">…</span></div></div>' +
+      '<span class="chip id" id="cat-count">…</span></div>' +
+      '<label class="check tiny" id="cat-only-adhoc-wrap" title="' + I18N.t('catalog.onlyAdhocHint') + '">' +
+      '<input type="checkbox" id="cat-only-adhoc"><span></span>' + I18N.t('catalog.onlyAdhoc') + '</label></div>' +
       '<div class="catalog-wrap"><table class="catalog-table"><thead><tr><th>' + I18N.t('catalog.id') + '</th><th>' + I18N.t('catalog.name') + '</th><th>' + I18N.t('catalog.crosslink') + '</th>' +
       (IS_ADMIN ? '<th></th>' : '') + '</tr></thead>' +
       '<tbody id="cat-body"><tr><td colspan="4" class="empty small">' + I18N.t('catalog.loading') + '</td></tr></tbody></table></div>' +
+      '<div class="catalog-note"><i class="fas fa-circle" style="color:var(--ok)"></i> ' + I18N.t('catalog.adhocNote') + '</div>' +
       '<div class="row" id="cat-more-row" style="display:none;justify-content:center;gap:8px;margin-top:8px">' +
       '<button class="btn ghost sm" id="cat-more"><i class="fas fa-chevron-down"></i> ' + I18N.t('catalog.more') + '</button>' +
       '<button class="btn ghost sm" id="cat-all"><i class="fas fa-list"></i> ' + I18N.t('catalog.all') + '</button></div>');
@@ -1224,6 +1228,14 @@
       onReady: function (api) {
         var search = UI.$('#cat-search', api.body);
         if (search) search.addEventListener('input', function () { renderCatalog(search.value); });
+        var onlyAdhoc = UI.$('#cat-only-adhoc', api.body);
+        if (onlyAdhoc) {
+          onlyAdhoc.checked = catalogOnlyAdhoc;
+          onlyAdhoc.addEventListener('change', function () {
+            catalogOnlyAdhoc = this.checked;
+            renderCatalog(search ? search.value : '');
+          });
+        }
         var more = UI.$('#cat-more', api.body);
         if (more) more.addEventListener('click', function () { appendCatalogPage(); });
         var all = UI.$('#cat-all', api.body);
@@ -1289,12 +1301,13 @@
     for (var i = 0; i < games.length; i++) {
       var g = games[i];
       if (q && g.id.toLowerCase().indexOf(q) < 0 && (g.name || '').toLowerCase().indexOf(q) < 0) continue;
+      if (catalogOnlyAdhoc && g.adhoc === undefined) continue;
       catalogFiltered.push(g);
     }
 
     var count = UI.$('#cat-count');
     if (count) {
-      count.textContent = q
+      count.textContent = (q || catalogOnlyAdhoc)
         ? I18N.t('catalog.found', UI.fmtInt(catalogFiltered.length), UI.fmtInt(games.length))
         : I18N.t('catalog.games', UI.fmtInt(games.length));
     }
@@ -1319,7 +1332,15 @@
     var html = [];
     for (var i = catalogRendered; i < end; i++) {
       var g = catalogFiltered[i];
-      html.push('<tr><td class="id">' + UI.esc(g.id) + '</td><td>' + UI.esc(g.name) + '</td>' +
+      var isAdhoc = g.adhoc !== undefined;
+      var adhocChip = isAdhoc
+        ? ' <span class="chip adhoc" title="' + UI.esc(I18N.t('catalog.adhocBadge')) +
+          (g.adhoc ? ' (' + UI.esc(g.adhoc) + ')' : '') + '"><i class="fas fa-wifi"></i>' +
+          (g.adhoc ? UI.esc(g.adhoc) : '') + '</span>'
+        : '';
+      html.push('<tr' + (isAdhoc ? ' class="adhoc"' : '') + '>' +
+        '<td class="id">' + UI.esc(g.id) + '</td>' +
+        '<td class="name' + (isAdhoc ? ' adhoc' : '') + '">' + UI.esc(g.name) + adhocChip + '</td>' +
         '<td class="id">' + UI.esc(g.crosslink || '') + '</td>' +
         (IS_ADMIN ? '<td class="act"><button class="mini" data-edit="' + UI.esc(g.id) + '" title="' + I18N.t('catalog.fillForm') + '"><i class="fas fa-pen-to-square"></i></button></td>' : '') +
         '</tr>');

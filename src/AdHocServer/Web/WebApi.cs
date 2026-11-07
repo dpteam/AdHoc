@@ -776,6 +776,7 @@ namespace Dpt.AdHoc.Web
             jb.Prop("ok", true);
             jb.Prop("count", db.Count);
             jb.Prop("crosslinks", db.CrosslinkCount);
+            jb.Prop("adhoc", db.AdhocCount);
             jb.Name("games").BeginArray();
             List<KeyValuePair<string, string>> list = db.Snapshot();
             Dictionary<string, string> links = db.SnapshotLinks();
@@ -786,6 +787,8 @@ namespace Dpt.AdHoc.Web
                 jb.Prop("name", list[i].Value);
                 string link;
                 if (links.TryGetValue(list[i].Key, out link)) jb.Prop("crosslink", link);
+                string adhoc = db.AdhocOf(list[i].Key);
+                if (adhoc != null) jb.Prop("adhoc", adhoc);
                 jb.EndObject();
             }
             jb.EndArray();

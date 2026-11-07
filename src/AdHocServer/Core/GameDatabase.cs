@@ -16,9 +16,12 @@ namespace Dpt.AdHoc.Core
     {
         private readonly object _sync = new object();
         private readonly string _path;
+        private readonly string _adhocPath;
         private Dictionary<string, string> _names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> _links = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string> _adhoc = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private DateTime _loadedWriteUtc = DateTime.MinValue;
+        private DateTime _adhocWriteUtc = DateTime.MinValue;
         private DateTime _lastReloadCheckUtc = DateTime.MinValue;
         private bool _dirty;
 
@@ -26,6 +29,7 @@ namespace Dpt.AdHoc.Core
         {
             try { Directory.CreateDirectory(dataDir); } catch { }
             _path = Path.Combine(dataDir, "games.json");
+            _adhocPath = Path.Combine(dataDir, "adhoc.json");
             Load();
         }
 
@@ -33,6 +37,7 @@ namespace Dpt.AdHoc.Core
 
         public int Count { get { lock (_sync) { return _names.Count; } } }
         public int CrosslinkCount { get { lock (_sync) { return _links.Count; } } }
+        public int AdhocCount { get { lock (_sync) { return _adhoc.Count; } } }
 
         private void Load()
         {
@@ -77,6 +82,7 @@ namespace Dpt.AdHoc.Core
                 try { _loadedWriteUtc = File.Exists(_path) ? File.GetLastWriteTimeUtc(_path) : DateTime.MinValue; }
                 catch { _loadedWriteUtc = DateTime.MinValue; }
             }
+            LoadAdhoc();
 
             if (_dirty) Save();
 
@@ -86,14 +92,25 @@ namespace Dpt.AdHoc.Core
 
         private void ReadMap(object node, Dictionary<string, string> into)
         {
+            ReadMap(node, into, 160, false);
+        }
+
+        private void ReadMap(object node, Dictionary<string, string> into, int maxLen)
+        {
+            ReadMap(node, into, maxLen, true);
+        }
+
+        private void ReadMap(object node, Dictionary<string, string> into, int maxLen, bool allowEmptyValue)
+        {
             Dictionary<string, object> map = node as Dictionary<string, object>;
             if (map == null) return;
             foreach (KeyValuePair<string, object> kv in map)
             {
                 string key = NormalizeId(kv.Key);
                 string val = kv.Value as string;
-                if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(val)) continue;
-                into[key] = Util.Clean(val, 160);
+                if (string.IsNullOrEmpty(key)) continue;
+                if (string.IsNullOrEmpty(val) && !allowEmptyValue) continue;
+                into[key] = Util.Clean(val ?? "", maxLen);
             }
         }
 
@@ -103,6 +120,58 @@ namespace Dpt.AdHoc.Core
             Load();
         }
 
+        /// <summary>
+        /// Loads data/adhoc.json: product id -> player count ("" when the count is unknown).
+        /// Missing file is fine - then every game is simply "unknown".
+        /// </summary>
+        private void LoadAdhoc()
+        {
+            Dictionary<string, string> map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (File.Exists(_adhocPath))
+                {
+                    Dictionary<string, object> root = Json.ParseObject(File.ReadAllText(_adhocPath, Encoding.UTF8));
+                    ReadMap(Json.Get(root, "games"), map, 8);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("DB", "adhoc.json is broken, ignoring it: " + ex.Message);
+                map.Clear();
+            }
+
+            lock (_sync)
+            {
+                _adhoc = map;
+                try { _adhocWriteUtc = File.Exists(_adhocPath) ? File.GetLastWriteTimeUtc(_adhocPath) : DateTime.MinValue; }
+                catch { _adhocWriteUtc = DateTime.MinValue; }
+            }
+
+            if (map.Count > 0) Log.Info("DB", "Ad Hoc support known for " + map.Count + " product ids");
+        }
+
+        /// <summary>Player count ("2-4") when the game is known to support Ad Hoc, otherwise null.</summary>
+        public string AdhocOf(string productId)
+        {
+            string id = NormalizeId(productId);
+            if (id.Length == 0) return null;
+            lock (_sync)
+            {
+                string players;
+                if (_adhoc.TryGetValue(id, out players)) return players ?? "";
+                // a regional alias inherits from its canonical id
+                string to;
+                if (_links.TryGetValue(id, out to) && _adhoc.TryGetValue(NormalizeId(to), out players))
+                    return players ?? "";
+            }
+            return null;
+        }
+
+        public bool HasAdhoc(string productId)
+        {
+            return AdhocOf(productId) != null;
+        }
         /// <summary>Reload if the file changed on disk (throttled to once per 2 seconds).</summary>
         public void MaybeReload()
         {
@@ -114,6 +183,18 @@ namespace Dpt.AdHoc.Core
                 if (!File.Exists(_path)) return;
                 DateTime write = File.GetLastWriteTimeUtc(_path);
                 if (write == _loadedWriteUtc) return;
+                // reload the Ad Hoc table too, it is edited independently
+                try
+                {
+                    DateTime aw = File.Exists(_adhocPath) ? File.GetLastWriteTimeUtc(_adhocPath) : DateTime.MinValue;
+                    if (aw != _adhocWriteUtc)
+                    {
+                        Log.Info("DB", "adhoc.json changed on disk, reloading");
+                        LoadAdhoc();
+                    }
+                }
+                catch { }
+
                 Log.Info("DB", "games.json changed on disk, reloading");
                 Load();
             }

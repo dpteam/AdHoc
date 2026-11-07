@@ -1398,3 +1398,26 @@ input[type="range"]::-moz-range-thumb {
   .chat-text { flex: 1 1 100%; }
   .chat-captcha, .chat-answer { flex: 0 0 auto; }
 }
+
+/* ------------------------------------------------------- catalog: ad hoc games */
+.catalog-table tr.adhoc td.id { color: var(--ok); }
+.catalog-table td.name.adhoc { color: var(--ok); font-weight: 600; }
+.chip.adhoc {
+  margin-left: 6px;
+  padding: 0 5px;
+  color: var(--ok);
+  border-color: rgba(47, 143, 87, .45);
+  background: rgba(47, 143, 87, .10);
+  font-size: 10px;
+}
+.chip.adhoc i { font-size: 9px; }
+.catalog-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.catalog-note i { font-size: 8px; }
+#cat-only-adhoc-wrap { margin-left: 2px; }

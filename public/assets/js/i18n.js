@@ -17,6 +17,10 @@
      ---------------------------------------------------------------------- */
 
   var EN = {
+    'catalog.onlyAdhoc': 'Only games with Ad Hoc',
+    'catalog.onlyAdhocHint': 'Show only games known to support Ad Hoc multiplayer',
+    'catalog.adhocNote': 'Green titles are games with confirmed Ad Hoc support',
+    'catalog.adhocBadge': 'Ad Hoc supported',
     'about.topItem': '{0} — peak {1}, {2}',
     'settings.onlyActive': 'Show only games with players by default',
     'chat.title': 'Chat',
@@ -308,6 +312,10 @@
   };
 
   var RU = {
+    'catalog.onlyAdhoc': 'Только с Ad Hoc',
+    'catalog.onlyAdhocHint': 'Показывать только игры с подтверждённой поддержкой Ad Hoc',
+    'catalog.adhocNote': 'Зелёным цветом игры, где точно есть Ad Hoc',
+    'catalog.adhocBadge': 'Есть Ad Hoc',
     'about.topItem': '{0} — пик {1}, {2}',
     'settings.onlyActive': 'Показывать только игры с игроками',
     'chat.title': 'Чат',
@@ -600,6 +608,10 @@
   };
 
   var UK = {
+    'catalog.onlyAdhoc': 'Лише з Ad Hoc',
+    'catalog.onlyAdhocHint': 'Показувати лише ігри з підтвердженою підтримкою Ad Hoc',
+    'catalog.adhocNote': 'Зеленим кольором ігри, де точно є Ad Hoc',
+    'catalog.adhocBadge': 'Є Ad Hoc',
     'chat.title': 'Чат',
     'chat.empty': 'поки немає повідомлень',
     'chat.nickPh': 'нік',
@@ -690,6 +702,10 @@
   };
 
   var LT = {
+    'catalog.onlyAdhoc': 'Tik su Ad Hoc',
+    'catalog.onlyAdhocHint': 'Rodyti tik žaidimus su patvirtintu Ad Hoc palaikymu',
+    'catalog.adhocNote': 'Žalia spalva – žaidimai, kurie tikrai turi Ad Hoc',
+    'catalog.adhocBadge': 'Turi Ad Hoc',
     'chat.title': 'Pokalbiai',
     'chat.empty': 'kol kas žinučių nėra',
     'chat.nickPh': 'slapyvardis',
@@ -780,6 +796,10 @@
   };
 
   var PL = {
+    'catalog.onlyAdhoc': 'Tylko z Ad Hoc',
+    'catalog.onlyAdhocHint': 'Pokaż tylko gry z potwierdzoną obsługą Ad Hoc',
+    'catalog.adhocNote': 'Zielone tytuły to gry z potwierdzoną obsługą Ad Hoc',
+    'catalog.adhocBadge': 'Obsługa Ad Hoc',
     'chat.title': 'Czat',
     'chat.empty': 'brak wiadomości',
     'chat.nickPh': 'nick',
@@ -870,6 +890,10 @@
   };
 
   var PTBR = {
+    'catalog.onlyAdhoc': 'Só com Ad Hoc',
+    'catalog.onlyAdhocHint': 'Mostrar apenas jogos com suporte a Ad Hoc confirmado',
+    'catalog.adhocNote': 'Títulos em verde são jogos com suporte a Ad Hoc confirmado',
+    'catalog.adhocBadge': 'Suporta Ad Hoc',
     'chat.title': 'Chat',
     'chat.empty': 'nenhuma mensagem ainda',
     'chat.nickPh': 'nick',
@@ -960,6 +984,10 @@
   };
 
   var ES = {
+    'catalog.onlyAdhoc': 'Solo con Ad Hoc',
+    'catalog.onlyAdhocHint': 'Mostrar solo juegos con soporte Ad Hoc confirmado',
+    'catalog.adhocNote': 'Los títulos en verde son juegos con soporte Ad Hoc confirmado',
+    'catalog.adhocBadge': 'Compatible con Ad Hoc',
     'chat.title': 'Chat',
     'chat.empty': 'todavía no hay mensajes',
     'chat.nickPh': 'nick',
@@ -1050,6 +1078,10 @@
   };
 
   var DE = {
+    'catalog.onlyAdhoc': 'Nur mit Ad Hoc',
+    'catalog.onlyAdhocHint': 'Nur Spiele mit bestätigter Ad-Hoc-Unterstützung zeigen',
+    'catalog.adhocNote': 'Grüne Titel sind Spiele mit bestätigter Ad-Hoc-Unterstützung',
+    'catalog.adhocBadge': 'Ad Hoc unterstützt',
     'chat.title': 'Chat',
     'chat.empty': 'noch keine Nachrichten',
     'chat.nickPh': 'Nick',
@@ -1140,6 +1172,10 @@
   };
 
   var FR = {
+    'catalog.onlyAdhoc': 'Seulement Ad Hoc',
+    'catalog.onlyAdhocHint': 'Afficher uniquement les jeux avec prise en charge Ad Hoc confirmée',
+    'catalog.adhocNote': 'Les titres en vert sont des jeux avec prise en charge Ad Hoc confirmée',
+    'catalog.adhocBadge': 'Ad Hoc pris en charge',
     'chat.title': 'Chat',
     'chat.empty': 'pas encore de messages',
     'chat.nickPh': 'pseudo',
@@ -1230,6 +1266,10 @@
   };
 
   var IT = {
+    'catalog.onlyAdhoc': 'Solo con Ad Hoc',
+    'catalog.onlyAdhocHint': 'Mostra solo giochi con supporto Ad Hoc confermato',
+    'catalog.adhocNote': 'I titoli verdi sono giochi con supporto Ad Hoc confermato',
+    'catalog.adhocBadge': 'Supporta Ad Hoc',
     'chat.title': 'Chat',
     'chat.empty': 'nessun messaggio',
     'chat.nickPh': 'nick',
@@ -1320,6 +1360,10 @@
   };
 
   var JA = {
+    'catalog.onlyAdhoc': 'Ad Hoc 対応のみ',
+    'catalog.onlyAdhocHint': 'Ad Hoc 対応が確認されているゲームのみ表示',
+    'catalog.adhocNote': '緑色のタイトルは Ad Hoc 対応が確認されているゲームです',
+    'catalog.adhocBadge': 'Ad Hoc 対応',
     'chat.title': 'チャット',
     'chat.empty': 'まだメッセージはありません',
     'chat.nickPh': 'ニック',
@@ -1410,6 +1454,10 @@
   };
 
   var KO = {
+    'catalog.onlyAdhoc': 'Ad Hoc 지원만',
+    'catalog.onlyAdhocHint': 'Ad Hoc 지원이 확인된 게임만 표시',
+    'catalog.adhocNote': '초록색 제목은 Ad Hoc 지원이 확인된 게임입니다',
+    'catalog.adhocBadge': 'Ad Hoc 지원',
     'chat.title': '채팅',
     'chat.empty': '아직 메시지가 없습니다',
     'chat.nickPh': '닉네임',
@@ -1500,6 +1548,10 @@
   };
 
   var ZH = {
+    'catalog.onlyAdhoc': '仅 Ad Hoc',
+    'catalog.onlyAdhocHint': '只显示已确认支持 Ad Hoc 的游戏',
+    'catalog.adhocNote': '绿色标题表示已确认支持 Ad Hoc 的游戏',
+    'catalog.adhocBadge': '支持 Ad Hoc',
     'chat.title': '聊天',
     'chat.empty': '还没有消息',
     'chat.nickPh': '昵称',
@@ -1590,6 +1642,10 @@
   };
 
   var ID = {
+    'catalog.onlyAdhoc': 'Hanya Ad Hoc',
+    'catalog.onlyAdhocHint': 'Tampilkan hanya game dengan dukungan Ad Hoc yang terkonfirmasi',
+    'catalog.adhocNote': 'Judul hijau adalah game dengan dukungan Ad Hoc terkonfirmasi',
+    'catalog.adhocBadge': 'Mendukung Ad Hoc',
     'chat.title': 'Obrolan',
     'chat.empty': 'belum ada pesan',
     'chat.nickPh': 'nick',
@@ -1680,6 +1736,10 @@
   };
 
   var TR = {
+    'catalog.onlyAdhoc': 'Sadece Ad Hoc',
+    'catalog.onlyAdhocHint': 'Yalnızca Ad Hoc desteği doğrulanmış oyunları göster',
+    'catalog.adhocNote': 'Yeşil başlıklar Ad Hoc desteği doğrulanmış oyunlardır',
+    'catalog.adhocBadge': 'Ad Hoc destekli',
     'chat.title': 'Sohbet',
     'chat.empty': 'henüz mesaj yok',
     'chat.nickPh': 'takma ad',
@@ -1770,6 +1830,10 @@
   };
 
   var VI = {
+    'catalog.onlyAdhoc': 'Chỉ Ad Hoc',
+    'catalog.onlyAdhocHint': 'Chỉ hiện game đã xác nhận hỗ trợ Ad Hoc',
+    'catalog.adhocNote': 'Tiêu đề màu xanh là game đã xác nhận hỗ trợ Ad Hoc',
+    'catalog.adhocBadge': 'Hỗ trợ Ad Hoc',
     'chat.title': 'Trò chuyện',
     'chat.empty': 'chưa có tin nhắn',
     'chat.nickPh': 'nick',

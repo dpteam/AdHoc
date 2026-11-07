@@ -16,7 +16,7 @@
 | Метод | Путь | Что отдаёт |
 |---|---|---|
 | GET | `/api/status` | игры → группы → ники, статистика, последние выходы, события |
-| GET | `/api/games` | каталог: 3900+ названий, crosslink'и, `unknownIds` |
+| GET | `/api/games` | каталог: 3900+ названий, crosslink'и, `unknownIds`, `adhoc` |
 | GET | `/api/history?limit=50` | завершённые сессии (без MAC/IP) |
 | GET | `/api/health` | `{"ok":true,"role":"public","uptimeSec":…}` |
 | GET | `/status.xml` | легаси PRO Online XML |
@@ -93,6 +93,39 @@
 Хэш живёт только в памяти, на диск не пишется и наружу не отдаётся — публикуются
 только счётчики. Ни IP, ни UA, ни cookie. Хранится в `data/visits.json`
 (`web.visits=false` выключает).
+
+### Поддержка Ad Hoc в каталоге
+
+`GET /api/games` отдаёт по каждой игре необязательное поле `adhoc` — число игроков,
+если поддержка Ad Hoc подтверждена, и ничего, если данных нет:
+
+```json
+{ "ok": true, "count": 3912, "crosslinks": 115, "adhoc": 1170,
+  "games": [
+    { "id": "ULUS10084", "name": "Monster Hunter Freedom", "adhoc": "2-4" },
+    { "id": "ULUS10466", "name": "Tekken 6", "adhoc": "2" },
+    { "id": "ULUS10391", "name": "Monster Hunter Freedom Unite", "adhoc": "2-4" }
+  ] }
+```
+
+`adhoc` — это `""` (поддержка есть, число игроков неизвестно) или `"2-4"`.
+Данные лежат в `data/adhoc.json`, пересобираются `tools/build_adhoc.py` и
+перечитываются на лету, как `games.json`. Региональные алиасы наследуют значение
+от канонического ID через crosslink.
+
+**Откуда берётся «точно»** (только положительные доказательства):
+
+1. поле `multiplayer` в pspudb — явный `AdHoc: 2-4` (1065 ID);
+2. описание игры в магазине с упоминанием ad hoc рядом со словом про игру
+   вместе (`multiplayer`, `co-op`, `race`, `battle`…), при этом gameshare-упоминания
+   без мультиплеера отбрасываются (90 ID);
+3. небольшой ручной список проверенных игр, которых нет в источниках или они там
+   помечены неверно: Tekken 6, Dissidia, God Eater, Lord of Arcana, Initial D,
+   Phantasy Star Portable 1/2, Kingdom Hearts BBS, MGS Peace Walker (16 ID).
+
+`AdHoc: -` в pspudb трактуется как «нет данных», а не как «точно нет»: для
+Phantasy Star Portable 2 там стоит `-`, хотя кооператив есть. Всё остальное
+(2742 ID) остаётся серым — отсутствие доказательств не означает отсутствие игры.
 
 ### Публичный чат доски
 

@@ -1112,6 +1112,7 @@ namespace Dpt.AdHoc.Net
                     if ((DateTime.UtcNow - created).TotalSeconds < 10) continue;
 
                     int relayCount = 0;
+                    List<string> withoutRelay = new List<string>();
                     DateTime now = DateTime.UtcNow;
                     for (int m = 0; m < members.Count; m++)
                     {
@@ -1120,7 +1121,8 @@ namespace Dpt.AdHoc.Net
                         // games recreate their PDP sockets when the lobby is redone; a short gap
                         // must not look like "this player turned the relay off"
                         double idle = (now - _app.Relay.LastActivityForMac(ms.Mac)).TotalSeconds;
-                        if (idle < 30) relayCount++;
+                        if (idle < 30) { relayCount++; continue; }
+                        withoutRelay.Add(ms.Nickname);
                     }
 
                     if (relayCount == 0 || relayCount == members.Count) continue;
@@ -1136,7 +1138,9 @@ namespace Dpt.AdHoc.Net
 
                     string text = "Mixed transports in " + game.Name + " / " + Util.GroupDisplayName(group.Name) + ": " +
                                   relayCount + " of " + members.Count +
-                                  " players use the relay. Turn on 'Try to use server-provided packet relay' " +
+                                  " players use the relay" +
+                                  (withoutRelay.Count > 0 ? " (no relay: " + string.Join(", ", withoutRelay.ToArray()) + ")" : "") +
+                                  ". Turn on 'Try to use server-provided packet relay' " +
                                   "for every player (or for none) - a mixed group cannot see each other.";
                     Log.Warn("RELAY", text);
                     _state.AddEvent("hint", text, game.Id, game.Name, "");

@@ -763,7 +763,9 @@ namespace Dpt.AdHoc.Net
         /// </summary>
         private void NotePdpDrop(byte[] header, ushort dport)
         {
-            string dst = MacKey(header, 0);
+            byte[] mac = new byte[6];
+            Buffer.BlockCopy(header, 0, mac, 0, 6);
+            string dst = MacKey(mac, 0);
             lock (_dropHintLock)
             {
                 DateTime last;
@@ -772,12 +774,17 @@ namespace Dpt.AdHoc.Net
                 if (_dropHints.Count > 200) _dropHints.Clear();
             }
 
-            string text = "PDP frame (dst port " + dport + ") for " + dst +
+            // Name the player when we can: "no relay for NickBock" is actionable, a MAC is not.
+            string who = "";
+            try { who = _app.State.NicknameForMac(mac); } catch { }
+            string label = who.Length > 0 ? who + " (" + dst + ")" : dst;
+
+            string text = "PDP frame (dst port " + dport + ") for " + label +
                           " dropped: no relay session for that player. They probably have " +
                           "'Try to use server-provided packet relay' turned off, or their game has not " +
                           "opened the session yet - enable the relay for every player.";
             Log.Warn("RELAY", text);
-            try { _app.State.AddEvent("hint", text, "", "", ""); } catch { }
+            try { _app.State.AddEvent("hint", text, "", "", who); } catch { }
         }
 
         /// <summary>Bidirectional raw byte pump for a linked PTP pair.</summary>

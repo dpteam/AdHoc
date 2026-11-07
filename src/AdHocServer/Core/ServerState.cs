@@ -99,6 +99,24 @@ namespace Dpt.AdHoc.Core
 
         public long EventSeq { get { lock (Sync) { return _eventSeq; } } }
 
+        /// <summary>Nickname of the player behind a MAC, or "" when nobody matches.</summary>
+        public string NicknameForMac(byte[] mac)
+        {
+            if (mac == null) return "";
+            string text = Util.Mac(mac);
+            lock (Sync)
+            {
+                foreach (KeyValuePair<string, ClientSession> kv in Sessions)
+                {
+                    ClientSession s = kv.Value;
+                    if (s.Mac == null) continue;
+                    if (!string.Equals(s.MacText, text, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (s.Nickname.Length > 0) return s.Nickname;
+                }
+            }
+            return "";
+        }
+
         public void SessionOpened(ClientSession s)
         {
             lock (Sync)

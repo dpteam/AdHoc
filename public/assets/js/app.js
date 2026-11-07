@@ -20,6 +20,7 @@
     logLines: [],
     logPaused: false,
     conn: 'init',
+    authOk: null,
     failures: 0,
     pollTimer: null,
     logTimer: null,
@@ -138,6 +139,7 @@
           return;
         }
         showGate(false);
+        App.authOk = true;
         SoundFX.play('online');
         start();
         poll();
@@ -175,9 +177,19 @@
     }, 9000);
   }
 
+  /** Admin calls need a working key: without one every request would be a 401.
+   *  authOk is driven by the server's answers, not by the local key derivation -
+   *  a remembered-but-wrong token still produces a key, and only the server knows. */
+  function canCallApi() {
+    if (!IS_ADMIN) return true;
+    if (App.authOk === false) return false;
+    return !!(API.hasKey && API.hasKey());
+  }
+
   function onPollFailed(err) {
     if (err && err.auth && IS_ADMIN) {
       App.conn = 'bad';
+      App.authOk = false;
       setConnPill('bad', I18N.t('auth.required'));
       showGate(true, I18N.t('auth.required'));
       return;
@@ -196,6 +208,7 @@
     var wasBad = App.conn === 'bad';
     App.failures = 0;
     App.conn = 'ok';
+    App.authOk = true;
     App.status = data;
 
     if (!App.initialised) {
@@ -682,6 +695,7 @@
 
   function logTick() {
     if (!IS_ADMIN || App.logPaused) return;
+    if (!canCallApi()) return;
     if (!UI.$('#log-view')) return;
     var level = App.settings.logLevel || 'all';
     var url = '/api/logs?since=' + App.lastLogSeq + '&limit=250&level=' + encodeURIComponent(level);
@@ -1439,6 +1453,7 @@
 
   function visitPing() {
     if (visitsOff) return;
+    if (!canCallApi()) return;
     API.post('/api/visit', {}, function (err, data) {
       if (err) { return; }
       if (!data || data.enabled === false) { visitsOff = true; return; }
@@ -1506,6 +1521,7 @@
   }
 
   function chatPoll(initial) {
+    if (!canCallApi()) return;
     var since = initial ? 0 : chat.lastSeq;
     API.get('/api/chat?since=' + since + '&limit=60', function (err, data) {
       if (err || !data) return;
@@ -1752,6 +1768,7 @@
         return;
       }
       showGate(false);
+      App.authOk = true;
       start();
     });
   }

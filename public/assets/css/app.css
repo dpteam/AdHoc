@@ -288,6 +288,7 @@ button { cursor: pointer; }
 
 .stat-grid {
   display: grid;
+  /* six cards: 6 / 3 / 2 columns keeps the rows full and the cards readable */
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
@@ -295,9 +296,12 @@ button { cursor: pointer; }
 
 .stat {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-auto-rows: min-content;
   align-items: center;
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 1px;
   min-height: 58px;
   padding: 10px 12px;
   background: var(--panel);
@@ -318,6 +322,7 @@ button { cursor: pointer; }
 }
 
 .stat-ico {
+  grid-row: 1 / span 2;
   display: grid;
   place-items: center;
   width: 34px; height: 34px;
@@ -334,18 +339,32 @@ button { cursor: pointer; }
 .i-cyan { background: linear-gradient(#51b5c6, #2f8b9b); }
 .i-red { background: linear-gradient(#d1655a, #a83a2e); }
 
-.stat-body { display: flex; flex-direction: column; min-width: 0; }
+.stat-body { grid-column: 2; display: flex; flex-direction: column; min-width: 0; }
 .stat-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: .5px;
   color: var(--muted);
-  white-space: nowrap;
+  line-height: 1.2;
+  /* wrap on the space instead of cutting words: long translations must fit too */
+  white-space: normal;
+  overflow-wrap: break-word;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.stat-value { font-size: 18px; font-weight: 700; letter-spacing: -.2px; line-height: 1.15; white-space: nowrap; }
-.stat-sub { margin-left: auto; font-size: 10px; color: var(--muted); text-align: right; white-space: nowrap; flex: none; }
+.stat-value { font-size: 18px; font-weight: 700; letter-spacing: -.2px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the sub line sits under the value: it never competes with it for width */
+.stat-sub {
+  grid-column: 2;
+  margin-left: 0;
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--muted);
+  text-align: left;
+  white-space: normal;
+  overflow: hidden;
+  min-width: 0;
+}
 
 .columns {
   display: grid;
@@ -1059,7 +1078,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* -------------------------------------------------------------- responsive */
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
   .stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
@@ -1087,7 +1106,7 @@ input[type="range"]::-moz-range-thumb {
   .topbar-inner { padding: 0 10px; gap: 10px; }
   .topbar-stats { padding: 5px 10px; gap: 10px; font-size: 10.5px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat { padding: 8px; }
+  .stat { padding: 8px; column-gap: 8px; }
   .stat-value { font-size: 16px; }
   .stat-sub { display: none; }
   .badges .badge.groups { display: none; }

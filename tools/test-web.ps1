@@ -205,6 +205,12 @@ try {
     $index = (Get-Status ($PublicBase + '/')).Content
     Assert ($index -like '*DPT.PSP*' -and $index -like '*data-role="public"*') 'public index served' ''
 
+    # guards: no build-tool leftovers leaking into the served markup
+    Assert ($index -notmatch "'''") 'public index has no stray triple quotes' ''
+    Assert ($index -notmatch '\bCHAT_PANEL\b|\bPANEL\s*=') 'public index has no script artifacts' ''
+    Assert ($index -notmatch 'import io|\.strip\(\)|_i18n_') 'public index has no python leftovers' ''
+    Assert ($index -like '*id="chat-panel"*') 'public index has the chat panel' ''
+
     # i18n: static markup is translatable and the language file ships all locales
     Assert ($index -like '*id="lang-select"*') 'language selector in the top bar' ''
     Assert ($index -like '*data-i18n="nav.lobby"*') 'index has i18n hooks' ''
@@ -310,6 +316,8 @@ try {
 
     $adminIndex = (Get-Status ($AdminBase + '/')).Content
     Assert ($adminIndex -like '*data-role="admin"*') 'admin shell served on admin port' ''
+    Assert ($adminIndex -notmatch "'''") 'admin shell has no stray triple quotes' ''
+    Assert ($adminIndex -like '*id="chat-panel"*') 'admin shell has the chat panel' ''
 
     # catalog save roundtrip (through the sealed channel)
     $save = Invoke-DptAdmin -Method POST -Target '/api/games' -Payload @{ id = 'ULUS99999'; name = 'Test Game (automation)' } -Encrypt

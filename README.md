@@ -321,6 +321,7 @@ python tools/build_games_db.py --pspudb database.db --games data/games.json --ou
 | Пустая карточка сервера в списке PPSSPP | статус качается по **HTTP** (клиент переписывает `https` → `http`): `http://host/data.json` должен отвечать без редиректа на https; см. [docs/SERVER_LIST.md](docs/SERVER_LIST.md) |
 | Лобби видно, а **сессии в игре** — нет | разные `Network → Port offset` (десктоп `0`, Android `10000`): сервер переводит порты автоматически, но лучше выставить одинаковый offset у всех; см. [docs/RELAY.md](docs/RELAY.md#разные-port-offset--главная-причина-сессии-не-находятся-в-игре) |
 | `requested invalid group name ""` в логе (Phantasy Star Portable 2) | было в 1.0.0, исправлено: пустое имя группы (8 нулей от `sceNetAdhocctlCreate(NULL)`) теперь валидно, как в референсном сервере PPSSPP. Обновите билд |
+| Игра показывает ID `000000001` (Sega Rally, Air Conflicts и др.) | это **Game Share** («Обмен игрой»): игра сама подменяет код на `000000001` и создаёт комнату `GameShare`. Сервер показывает её как «Game Share (demo mode)». Оба игрока должны быть в одном режиме — либо оба Game Share, либо оба запускают полную игру; хост Game Share и игрок полной игры никогда не встретятся. Плюс в Game Share гость скачивает данные от хоста, поэтому без ретранслятора это почти не работает |
 | Нет иконок | нет CDN; положите Font Awesome локально в `public/assets/vendor/` |
 | Нет звука | autoplay блокируется до первого клика по странице |
 

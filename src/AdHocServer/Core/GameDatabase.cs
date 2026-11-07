@@ -14,6 +14,24 @@ namespace Dpt.AdHoc.Core
     /// </summary>
     public sealed class GameDatabase
     {
+        /// <summary>
+        /// Product codes that are not real disc ids. Games in Game Share (a.k.a. game sharing)
+        /// mode send "000000001" instead of their own id - PPSSPP has the same note next to
+        /// ADHOCCTL_ADHOCID_LEN ("Air Conflicts is using 000000001 for GameSharing?").
+        /// Label them so the board does not show a meaningless number as a game name.
+        /// </summary>
+        private static readonly Dictionary<string, string> SyntheticNames =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "000000001", "Game Share (demo mode)" }
+            };
+
+        /// <summary>True when the code is a known placeholder rather than a real product id.</summary>
+        public static bool IsSynthetic(string productId)
+        {
+            return !string.IsNullOrEmpty(productId) && SyntheticNames.ContainsKey(NormalizeId(productId));
+        }
+
         private readonly object _sync = new object();
         private readonly string _path;
         private readonly string _adhocPath;
@@ -270,6 +288,8 @@ namespace Dpt.AdHoc.Core
         {
             string id = NormalizeId(productId);
             if (id.Length == 0) return "";
+            string synthetic;
+            if (SyntheticNames.TryGetValue(id, out synthetic)) return synthetic;
             lock (_sync)
             {
                 string name;

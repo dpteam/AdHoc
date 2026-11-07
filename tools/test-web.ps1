@@ -76,6 +76,10 @@ $p2 = Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy',
 $p3 = Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $here 'hold-client.ps1'),
     '-Nick', 'HolderThree', '-Game', 'ULES01213', '-NoGroup', '-MacSeed', '13', '-Seconds', '60',
     '-Server', $Server, '-Port', $AdhocPort) -PassThru -WindowStyle Hidden
+# a Game Share client: product code 000000001 must be labelled, not shown as a bare number
+$p4 = Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $here 'hold-client.ps1'),
+    '-Nick', 'ShareHolder', '-Game', '000000001', '-Group', 'GameShar', '-MacSeed', '14', '-Seconds', '60',
+    '-Server', $Server, '-Port', $AdhocPort) -PassThru -WindowStyle Hidden
 
 try {
     # ------------------------------------------------------------ public
@@ -96,6 +100,15 @@ try {
     $mhf = $status.games | Where-Object { $_.id -eq 'ULUS10084' }
     Assert ($null -ne $mhf) 'public sees the game' ''
     Assert (@(($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).members).Count -eq 2) 'public sees group members' ''
+
+    # Game Share sends 000000001 - the board must show a label, not the bare code
+    $share = $status.games | Where-Object { $_.id -eq '000000001' }
+    if ($null -ne $share) {
+        Assert ($share.name -eq 'Game Share (demo mode)') 'synthetic Game Share id is labelled' ("name=" + $share.name)
+        Assert ($share.known -eq $true) 'Game Share id counts as known' ("known=" + $share.known)
+    } else {
+        Write-Host "  [skip] Game Share holder did not connect in time" -ForegroundColor Yellow
+    }
 
     $raw = (Get-Status ($PublicBase + '/api/status')).Content
     Assert ($raw -notmatch '"mac"') 'public status has no MAC field' ''
@@ -338,7 +351,7 @@ try {
     Assert (@($games.Json.games | Where-Object { $_.id -eq 'ULUS99999' }).Count -eq 1) 'saved title visible' ''
 }
 finally {
-    foreach ($p in @($p1, $p2, $p3)) {
+    foreach ($p in @($p1, $p2, $p3, $p4)) {
         try { if ($p -and -not $p.HasExited) { $p.Kill() } } catch { }
     }
     if ($backup -and (Test-Path $backup)) {

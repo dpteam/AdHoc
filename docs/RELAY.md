@@ -152,6 +152,42 @@ Android-Android — `10000`). Перевод — страховка, а не з�
 сервер покажет второй `hint`: «PDP frame … for <mac> dropped: no relay session for that
 player» — значит у получателя релей **выключен** (или его игра ещё не открыла сессию).
 
+## Game Share (`000000001`)
+
+Некоторые игры в режиме **Game Share** («Обмен игрой») подменяют свой product code
+на `000000001` и создают комнату `GameShare` (в логе — `GameShar`, 8 байт).
+Так делает, например, Sega Rally; в исходниках PPSSPP рядом с
+`ADHOCCTL_ADHOCID_LEN` есть комментарий про то же самое у Air Conflicts.
+
+Что это значит на практике:
+
+- это **не ошибка сервера** — клиент действительно присылает такой код;
+- сервер показывает игру как `Game Share (demo mode)`, чтобы в лобби не висело
+  бессмысленное число;
+- **режимы не смешиваются**: два игрока в Game Share видят друг друга, но хост
+  Game Share и игрок, запустивший полную игру (у Sega Rally это `ULES00910`,
+  `ULES00911`, `ULJM05302`, `ULUS10311`), попадают в разные игры и не встретятся;
+- гость в Game Share **скачивает данные от хоста** по ad hoc, то есть трафик
+  плотный и односторонний — без ретранслятора за NAT это почти не работает.
+
+Сервер подсказывает это в логе и в админской ленте:
+
+```
+ShareHost is in Game Share mode (product code 000000001, shown as "Game Share (demo mode)").
+Everyone must pick the same mode: two players in Game Share see each other, but a Game Share
+host and a player running the full game never meet.
+```
+
+И отдельно — когда игрок создал комнату, никого не дождался и вышел:
+
+```
+ShareHost was alone in GameShar (000000001) for 8s and left - the game found no peers.
+Another player must be in the same game and the same mode.
+```
+
+Второе сообщение ловит самый частый случай «не работает ad hoc»: игрок тестировал один,
+без второго участника.
+
 ## Границы
 
 - **Не шифрует.** Как и оригинальный postoffice, сервер видит открытый игровой поток.

@@ -31,6 +31,8 @@ namespace Dpt.AdHoc.Core
         public readonly List<ClientSession> Sessions = new List<ClientSession>();
         public ClientSession Founder;
         public DateTime CreatedUtc = DateTime.UtcNow;
+        /// <summary>How many different players ever joined, so we can spot "joined alone".</summary>
+        public int EverJoined;
     }
 
     public sealed class HistoryEntry

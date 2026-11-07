@@ -561,6 +561,25 @@ namespace Dpt.AdHoc.Net
             s.ProductCode = resolved;
             s.GameName = _db.DisplayName(resolved);
             s.Hairpin = LocalNetwork.IsGateway(s.RemoteIp);
+
+            if (GameDatabase.IsSynthetic(rawCode))
+            {
+                // Not an error: the game switched to Game Share mode, which has its own id.
+                // Worth saying out loud, because the player then wonders why nobody joins.
+                Log.Warn("PROTO", s.Nickname + " is in Game Share mode (product code " + rawCode +
+                                  ", shown as \"" + s.GameName + "\"). Everyone must pick the same mode: " +
+                                  "two players in Game Share see each other, but a Game Share host and a " +
+                                  "player running the full game never meet.");
+                _state.AddEvent("hint", s.Nickname + " is in Game Share mode - all players must use the same mode",
+                                resolved, s.GameName, s.Nickname);
+            }
+            else if (!_db.HasTitle(rawCode))
+            {
+                // Unknown code: often a demo, a homebrew build or a modified rip.
+                Log.Info("PROTO", s.Nickname + " uses product code " + rawCode +
+                                  " which is not in the game database (demo, homebrew or a modified rip?)");
+            }
+
             if (s.Hairpin)
             {
                 Log.Warn("PROTO", "NAT hairpin suspected for " + s.Nickname + ": source " + s.RemoteIp +
@@ -717,6 +736,7 @@ namespace Dpt.AdHoc.Net
                 }
 
                 group.Sessions.Add(s);
+                group.EverJoined++;
                 if (group.Founder == null) group.Founder = s;
                 s.Group = group;
                 game.LastActivityUtc = DateTime.UtcNow;
@@ -773,6 +793,20 @@ namespace Dpt.AdHoc.Net
             {
                 game.Groups.Remove(group);
                 Log.Debug("PROTO", "group \"" + Util.GroupDisplayName(group.Name) + "\" removed (empty)");
+
+                // A player who creates a room, waits a moment and leaves was alone: the game
+                // searched for peers, found none and gave up. Say so, because the log otherwise
+                // looks like a clean join/leave and the real problem is invisible.
+                double lived = (DateTime.UtcNow - group.CreatedUtc).TotalSeconds;
+                if (group.EverJoined <= 1 && lived < 20)
+                {
+                    string label = Util.GroupDisplayName(group.Name);
+                    string text = s.Nickname + " was alone in " + label + " (" + game.Id + ") for " +
+                                  Math.Round(lived) + "s and left - the game found no peers. " +
+                                  "Another player must be in the same game and the same mode.";
+                    Log.Warn("PROTO", text);
+                    _state.AddEvent("hint", text, game.Id, game.Name, s.Nickname);
+                }
             }
             game.LastActivityUtc = DateTime.UtcNow;
         }

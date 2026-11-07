@@ -1,5 +1,5 @@
-﻿<!DOCTYPE html>
-<html lang="ru" data-theme="light" data-role="public">
+<!DOCTYPE html>
+<html lang="en" data-theme="light" data-role="public">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,7 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
-<link rel="stylesheet" href="assets/css/app.css?v=7">
+<link rel="stylesheet" href="assets/css/app.css?v=9">
 </head>
 <body>
 
@@ -18,35 +18,36 @@
       <span class="brand-mark"><i class="fas fa-tower-broadcast"></i></span>
       <span class="brand-text">
         <b>DPT.PSP</b>
-        <small>AdHoc Server</small>
+        <small data-i18n="app.brandSub">AdHoc Server</small>
       </span>
     </a>
 
-    <nav class="tabs" aria-label="Разделы">
-      <button class="tab active" id="tab-lobby" data-scroll="lobby"><i class="fas fa-gamepad"></i><span>Лобби</span></button>
-      <button class="tab" id="tab-catalog"><i class="fas fa-book-open"></i><span>Каталог игр</span></button>
-      <button class="tab" id="tab-settings"><i class="fas fa-sliders-h"></i><span>Настройки</span></button>
-      <button class="tab" id="tab-help"><i class="fas fa-circle-question"></i><span>Справка</span></button>
+    <nav class="tabs" data-i18n-aria="nav.sections" aria-label="Sections">
+      <button class="tab active" id="tab-lobby" data-scroll="lobby"><i class="fas fa-gamepad"></i><span data-i18n="nav.lobby">Lobby</span></button>
+      <button class="tab" id="tab-catalog"><i class="fas fa-book-open"></i><span data-i18n="nav.catalog">Game catalog</span></button>
+      <button class="tab" id="tab-settings"><i class="fas fa-sliders-h"></i><span data-i18n="nav.settings">Settings</span></button>
+      <button class="tab" id="tab-help"><i class="fas fa-circle-question"></i><span data-i18n="nav.help">Help</span></button>
     </nav>
 
     <div class="top-right">
-      <span class="role-pill" title="Публичная доска"><i class="fas fa-eye"></i> public</span>
-      <span class="conn-pill" id="conn-pill" title="Состояние связи с сервером">
-        <span class="dot"></span><span class="txt">подключение…</span>
+      <span class="role-pill" data-i18n-title="role.publicTitle" title="Public board"><i class="fas fa-eye"></i> <span data-i18n="role.public">public</span></span>
+      <span class="conn-pill" id="conn-pill" data-i18n-title="conn.title" title="Connection to the server">
+        <span class="dot"></span><span class="txt" data-i18n="conn.connecting">connecting…</span>
       </span>
-      <button class="icon-btn" id="theme-btn" title="Сменить тему" aria-label="Сменить тему"><i class="fas fa-moon"></i></button>
-      <button class="icon-btn" id="sound-btn" title="Звуки включены" aria-label="Звуки"><i class="fas fa-volume-high"></i></button>
+      <select class="lang-select" id="lang-select" aria-label="Language" data-i18n-aria="settings.language" title="Language"></select>
+      <button class="icon-btn" id="theme-btn" data-i18n-title="theme.title" data-i18n-aria="theme.title" title="Change theme" aria-label="Change theme"><i class="fas fa-moon"></i></button>
+      <button class="icon-btn" id="sound-btn" data-i18n-title="sound.on" data-i18n-aria="sound.on" title="Sounds on" aria-label="Sounds"><i class="fas fa-volume-high"></i></button>
     </div>
   </div>
 
   <div class="topbar-stats">
-    <span><i class="fas fa-clock"></i> uptime <b id="t-uptime">–</b></span>
-    <span><i class="fas fa-users"></i> online <b id="t-online">0</b></span>
-    <span><i class="fas fa-gamepad"></i> games <b id="t-games">0</b></span>
-    <span><i class="fas fa-bolt"></i> peak <b id="t-peak">0</b></span>
-    <span><i class="fas fa-layer-group"></i> groups <b id="t-groups">0</b></span>
-    <span><i class="fas fa-tower-broadcast"></i> relay <b id="t-relay">–</b></span>
-    <span class="right"><i class="fas fa-server"></i> adhoc <b id="t-port-adhoc">–</b></span>
+    <span><i class="fas fa-clock"></i> <span data-i18n="top.uptime">uptime</span> <b id="t-uptime">–</b></span>
+    <span><i class="fas fa-users"></i> <span data-i18n="top.online">online</span> <b id="t-online">0</b></span>
+    <span><i class="fas fa-gamepad"></i> <span data-i18n="top.games">games</span> <b id="t-games">0</b></span>
+    <span><i class="fas fa-bolt"></i> <span data-i18n="top.peak">peak</span> <b id="t-peak">0</b></span>
+    <span><i class="fas fa-layer-group"></i> <span data-i18n="top.groups">groups</span> <b id="t-groups">0</b></span>
+    <span><i class="fas fa-tower-broadcast"></i> <span data-i18n="top.relay">relay</span> <b id="t-relay">–</b></span>
+    <span class="right"><i class="fas fa-server"></i> <span data-i18n="top.adhoc">adhoc</span> <b id="t-port-adhoc">–</b></span>
   </div>
 </header>
 
@@ -55,33 +56,33 @@
   <section class="stat-grid" id="stat-cards" aria-live="polite">
     <div class="stat" data-card="online">
       <div class="stat-ico i-blue"><i class="fas fa-users"></i></div>
-      <div class="stat-body"><span class="stat-label">Игроков онлайн</span><span class="stat-value" id="s-online">0</span></div>
-      <span class="stat-sub" id="s-online-sub">из 0</span>
+      <div class="stat-body"><span class="stat-label" data-i18n="stats.online">Players online</span><span class="stat-value" id="s-online">0</span></div>
+      <span class="stat-sub" id="s-online-sub">–</span>
     </div>
     <div class="stat" data-card="games">
       <div class="stat-ico i-violet"><i class="fas fa-gamepad"></i></div>
-      <div class="stat-body"><span class="stat-label">Активных игр</span><span class="stat-value" id="s-games">0</span></div>
-      <span class="stat-sub" id="s-games-sub">0 групп</span>
+      <div class="stat-body"><span class="stat-label" data-i18n="stats.games">Active games</span><span class="stat-value" id="s-games">0</span></div>
+      <span class="stat-sub" id="s-games-sub">–</span>
     </div>
     <div class="stat" data-card="peak">
       <div class="stat-ico i-green"><i class="fas fa-bolt"></i></div>
-      <div class="stat-body"><span class="stat-label">Пик онлайна</span><span class="stat-value" id="s-peak">0</span></div>
-      <span class="stat-sub" id="s-peak-sub">за всё время</span>
+      <div class="stat-body"><span class="stat-label" data-i18n="stats.peak">Peak online</span><span class="stat-value" id="s-peak">0</span></div>
+      <span class="stat-sub" id="s-peak-sub" data-i18n="stats.peakSub">all time</span>
     </div>
     <div class="stat" data-card="conn">
       <div class="stat-ico i-amber"><i class="fas fa-plug"></i></div>
-      <div class="stat-body"><span class="stat-label">Всего коннектов</span><span class="stat-value" id="s-conn">0</span></div>
-      <span class="stat-sub" id="s-conn-sub">0 чатов</span>
+      <div class="stat-body"><span class="stat-label" data-i18n="stats.conn">Total connections</span><span class="stat-value" id="s-conn">0</span></div>
+      <span class="stat-sub" id="s-conn-sub">–</span>
     </div>
     <div class="stat" data-card="games-db">
       <div class="stat-ico i-cyan"><i class="fas fa-book"></i></div>
-      <div class="stat-body"><span class="stat-label">Игр в базе</span><span class="stat-value" id="s-db">0</span></div>
-      <span class="stat-sub" id="s-db-sub">0 регионов</span>
+      <div class="stat-body"><span class="stat-label" data-i18n="stats.db">Games in database</span><span class="stat-value" id="s-db">0</span></div>
+      <span class="stat-sub" id="s-db-sub">–</span>
     </div>
     <div class="stat" data-card="health">
       <div class="stat-ico i-red"><i class="fas fa-heart-pulse"></i></div>
-      <div class="stat-body"><span class="stat-label">Статус</span><span class="stat-value" id="s-health">ok</span></div>
-      <span class="stat-sub" id="s-health-sub">сервер в сети</span>
+      <div class="stat-body"><span class="stat-label" data-i18n="stats.status">Status</span><span class="stat-value" id="s-health">ok</span></div>
+      <span class="stat-sub" id="s-health-sub">–</span>
     </div>
   </section>
 
@@ -90,29 +91,29 @@
 
       <section class="panel" id="lobby">
         <div class="panel-head">
-          <h2><i class="fas fa-gamepad"></i> Игры онлайн</h2>
+          <h2><i class="fas fa-gamepad"></i> <span data-i18n="panel.games">Games online</span></h2>
           <div class="panel-tools">
             <label class="search">
               <i class="fas fa-search"></i>
-              <input type="search" id="search" placeholder="Поиск игры, ID или ника…" autocomplete="off" spellcheck="false">
+              <input type="search" id="search" data-i18n-ph="search.ph" placeholder="Search game, ID or nick…" autocomplete="off" spellcheck="false">
             </label>
-            <label class="check" title="Скрыть игры без игроков">
-              <input type="checkbox" id="only-active" checked><span></span>только с игроками
+            <label class="check" data-i18n-title="filter.onlyActiveTitle" title="Hide games without players">
+              <input type="checkbox" id="only-active" checked><span></span><span class="lbl" data-i18n="filter.onlyActive">with players only</span>
             </label>
-            <select id="sort" title="Сортировка">
-              <option value="players">по игрокам</option>
-              <option value="name">по названию</option>
-              <option value="activity">по активности</option>
+            <select id="sort" data-i18n-title="filter.sort" title="Sorting">
+              <option value="players" data-i18n="filter.sortPlayers">by players</option>
+              <option value="name" data-i18n="filter.sortName">by name</option>
+              <option value="activity" data-i18n="filter.sortActivity">by activity</option>
             </select>
-            <button class="btn ghost" id="refresh-btn" title="Обновить сейчас (R)"><i class="fas fa-rotate"></i></button>
+            <button class="btn ghost" id="refresh-btn" data-i18n-title="filter.refresh" title="Refresh now (R)"><i class="fas fa-rotate"></i></button>
           </div>
         </div>
         <div class="panel-body" id="games-list">
-          <div class="empty"><i class="fas fa-spinner fa-spin"></i> Загружаем лобби…</div>
+          <div class="empty"><i class="fas fa-spinner fa-spin"></i> <span data-i18n="lobby.loading">Loading the lobby…</span></div>
         </div>
         <div class="panel-foot">
           <span id="games-foot">–</span>
-          <span class="hint"><i class="fas fa-circle-info"></i> нажмите на игру, чтобы увидеть кто в какой группе</span>
+          <span class="hint"><i class="fas fa-circle-info"></i> <span data-i18n="lobby.footHint">click a game to see who is in which group</span></span>
         </div>
       </section>
 
@@ -121,37 +122,37 @@
     <aside class="col-side">
 
       <section class="panel compact">
-        <div class="panel-head"><h2><i class="fas fa-history"></i> Недавние игроки</h2>
+        <div class="panel-head"><h2><i class="fas fa-history"></i> <span data-i18n="panel.recent">Recent players</span></h2>
           <span class="panel-badge" id="recent-count">0</span>
         </div>
         <div class="panel-body list" id="recent-list">
-          <div class="empty small">пока пусто</div>
+          <div class="empty small" data-i18n="recent.empty">nothing yet</div>
         </div>
       </section>
 
       <section class="panel compact">
-        <div class="panel-head"><h2><i class="fas fa-bell"></i> События</h2>
-          <label class="check tiny" title="Звуки и всплывающие уведомления"><input type="checkbox" id="events-follow" checked><span></span>оповещать</label>
+        <div class="panel-head"><h2><i class="fas fa-bell"></i> <span data-i18n="panel.events">Events</span></h2>
+          <label class="check tiny" data-i18n-title="events.followTitle" title="Sounds and popups for events"><input type="checkbox" id="events-follow" checked><span></span><span class="lbl" data-i18n="events.follow">notify</span></label>
         </div>
         <div class="panel-body feed" id="events-list">
-          <div class="empty small">тишина…</div>
+          <div class="empty small" data-i18n="events.empty">silence…</div>
         </div>
       </section>
 
       <section class="panel compact">
-        <div class="panel-head"><h2><i class="fas fa-circle-info"></i> О сервере</h2></div>
+        <div class="panel-head"><h2><i class="fas fa-circle-info"></i> <span data-i18n="panel.about">About the server</span></h2></div>
         <div class="panel-body about">
-          <div class="about-row"><span>Протокол</span><b>PRO Online / PPSSPP</b></div>
-          <div class="about-row"><span>Порт adhoc</span><b id="a-adhoc">–</b></div>
-          <div class="about-row"><span>Ретранслятор</span><b id="a-relay">–</b></div>
-          <div class="about-row"><span>Версия</span><b id="a-version">–</b></div>
-          <div class="about-row"><span>Запущен</span><b id="a-uptime">–</b></div>
-          <div class="about-row"><span>Пик онлайна</span><b id="a-peak">–</b></div>
-          <div class="about-row"><span>Сессий всего</span><b id="a-sessions">–</b></div>
-          <div class="about-row"><span>В игре всего</span><b id="a-playtime">–</b></div>
-          <div class="about-row"><span>Первый запуск</span><b id="a-first">–</b></div>
+          <div class="about-row"><span data-i18n="about.protocol">Protocol</span><b>PRO Online / PPSSPP</b></div>
+          <div class="about-row"><span data-i18n="about.port">adhoc port</span><b id="a-adhoc">–</b></div>
+          <div class="about-row"><span data-i18n="about.relay">Packet relay</span><b id="a-relay">–</b></div>
+          <div class="about-row"><span data-i18n="about.version">Version</span><b id="a-version">–</b></div>
+          <div class="about-row"><span data-i18n="about.uptime">Started</span><b id="a-uptime">–</b></div>
+          <div class="about-row"><span data-i18n="about.peak">Peak online</span><b id="a-peak">–</b></div>
+          <div class="about-row"><span data-i18n="about.sessions">Sessions total</span><b id="a-sessions">–</b></div>
+          <div class="about-row"><span data-i18n="about.playtime">Time in game</span><b id="a-playtime">–</b></div>
+          <div class="about-row"><span data-i18n="about.first">First start</span><b id="a-first">–</b></div>
           <div class="about-note" id="a-top"></div>
-          <div class="about-note">Публичная доска: только просмотр. Логи, кик и правка базы доступны администратору локально.</div>
+          <div class="about-note" data-i18n="about.note">Public board: read-only. Logs, kick and catalog editing are available to the administrator locally.</div>
         </div>
       </section>
 
@@ -163,7 +164,7 @@
     <span class="sep">·</span>
     <span>PRO Online / PPSSPP adhocctl</span>
     <span class="sep">·</span>
-    <span id="f-uptime">uptime –</span>
+    <span id="f-uptime">–</span>
     <span class="right" id="f-host">public board</span>
   </footer>
 
@@ -172,9 +173,10 @@
 <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 <div class="modal-root" id="modal-root" hidden></div>
 
+<script src="assets/js/i18n.js?v=7"></script>
 <script src="assets/js/sound.js?v=6"></script>
-<script src="assets/js/ui.js?v=6"></script>
-<script src="assets/js/auth.js?v=6"></script>
-<script src="assets/js/app.js?v=11"></script>
+<script src="assets/js/ui.js?v=7"></script>
+<script src="assets/js/auth.js?v=7"></script>
+<script src="assets/js/app.js?v=13"></script>
 </body>
 </html>

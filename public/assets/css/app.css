@@ -486,6 +486,28 @@ textarea.input { height: auto; min-height: 64px; padding: 6px 8px; resize: verti
   transform: rotate(45deg);
 }
 .check input:focus-visible + span { box-shadow: 0 0 0 3px var(--accent-soft); }
+/* label text inside .check must not look like the checkbox box */
+.check span.lbl {
+  width: auto; height: auto; min-width: 0;
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+  position: static; flex: 0 1 auto;
+}
+
+/* language picker */
+.lang-select {
+  height: 24px;
+  max-width: 132px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-soft);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.lang-select:hover { border-color: var(--accent-lo); color: var(--text); }
+.lang-select:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .btn {
   display: inline-flex;
@@ -1216,3 +1238,15 @@ input[type="range"]::-moz-range-thumb {
   background: transparent;
 }
 .chip.relay i, .chip.p2p i { font-size: 9px; }
+
+/* ---------------------------------------------------------- i18n: small screens */
+@media (max-width: 900px) {
+  .topbar-inner { gap: 10px; }
+  .lang-select { max-width: 96px; }
+  .role-pill { display: none; }
+}
+@media (max-width: 640px) {
+  .lang-select { max-width: 70px; font-size: 10.5px; }
+  .topbar-stats { overflow-x: auto; white-space: nowrap; }
+  .topbar-stats::-webkit-scrollbar { height: 0; }
+}

@@ -150,6 +150,17 @@ try {
     $index = (Get-Status ($PublicBase + '/')).Content
     Assert ($index -like '*DPT.PSP*' -and $index -like '*data-role="public"*') 'public index served' ''
 
+    # i18n: static markup is translatable and the language file ships all locales
+    Assert ($index -like '*id="lang-select"*') 'language selector in the top bar' ''
+    Assert ($index -like '*data-i18n="nav.lobby"*') 'index has i18n hooks' ''
+    $i18n = (Get-Status ($PublicBase + '/assets/js/i18n.js?v=4'))
+    Assert ($i18n.Status -eq 200) 'i18n.js served' ("status=" + $i18n.Status)
+    foreach ($code in @('en', 'ru', 'uk', 'lt', 'pl', 'pt-BR', 'es', 'de', 'fr', 'it', 'ja', 'ko', 'zh-CN', 'id', 'tr', 'vi')) {
+        Assert ($i18n.Content -like ("*'" + $code + "'*")) ("locale present: " + $code) ''
+    }
+    Assert ($i18n.Content -like "*'nav.lobby'*") 'dictionary keys present' ''
+    Assert ($i18n.Content -like '*localStorage*') 'language is persisted client-side' ''
+
     # proxy style request: spoofed X-Forwarded-For must not break anything
     $xff = Invoke-WebRequest -UseBasicParsing -Uri ($PublicBase + '/api/health') -Headers @{ 'X-Forwarded-For' = '203.0.113.9, 192.168.1.2' } -TimeoutSec 10
     Assert ([int]$xff.StatusCode -eq 200) 'works behind reverse proxy (X-Forwarded-For)' ''

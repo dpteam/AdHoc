@@ -62,11 +62,11 @@ var UI = (function () {
     if (t === null) return '–';
     var diff = Math.floor((Date.now() - t) / 1000);
     if (diff < 0) diff = 0;
-    if (diff < 5) return 'сейчас';
-    if (diff < 60) return diff + 'с назад';
-    if (diff < 3600) return Math.floor(diff / 60) + 'м назад';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'ч назад';
-    return Math.floor(diff / 86400) + 'д назад';
+    if (diff < 5) return I18N.t('ago.now');
+    if (diff < 60) return I18N.t('ago.sec', diff);
+    if (diff < 3600) return I18N.t('ago.min', Math.floor(diff / 60));
+    if (diff < 86400) return I18N.t('ago.hour', Math.floor(diff / 3600));
+    return I18N.t('ago.day', Math.floor(diff / 86400));
   }
 
   function clock(iso) {
@@ -136,8 +136,8 @@ var UI = (function () {
         if (xhr.status >= 200 && xhr.status < 300) finish(null, data);
         else finish({ status: xhr.status, message: (data && data.error) || ('HTTP ' + xhr.status) }, data);
       };
-      xhr.ontimeout = function () { finish({ status: 0, message: 'таймаут запроса' }); };
-      xhr.onerror = function () { finish({ status: 0, message: 'нет связи с сервером' }); };
+      xhr.ontimeout = function () { finish({ status: 0, message: I18N.t('net.timeout') }); };
+      xhr.onerror = function () { finish({ status: 0, message: I18N.t('net.offline') }); };
       xhr.send(body === null || body === undefined ? null : JSON.stringify(body));
     } catch (e) {
       finish({ status: 0, message: e.message || 'request failed' });
@@ -211,7 +211,7 @@ var UI = (function () {
     box.setAttribute('aria-modal', 'true');
     box.innerHTML =
       '<div class="modal-head"><h3>' + (opts.icon ? '<i class="fas ' + esc(opts.icon) + '"></i>' : '') +
-      esc(opts.title || '') + '</h3><button class="x" title="Закрыть (Esc)"><i class="fas fa-xmark"></i></button></div>' +
+      esc(opts.title || '') + '</h3><button class="x" title="' + I18N.t('ui.close') + ' (Esc)"><i class="fas fa-xmark"></i></button></div>' +
       '<div class="modal-body"></div><div class="modal-foot"></div>';
 
     root.appendChild(box);
@@ -278,7 +278,7 @@ var UI = (function () {
       narrow: true,
       html: '<p style="margin:2px 0 4px;font-size:12.5px">' + esc(text) + '</p>',
       actions: [
-        { label: 'Отмена', cls: 'ghost', onClick: function (close) { close(); } },
+        { label: I18N.t('ui.cancel'), cls: 'ghost', onClick: function (close) { close(); } },
         { label: okLabel || 'OK', cls: danger ? 'danger right' : 'right', onClick: function (close) { close(); if (onOk) onOk(); } }
       ]
     });

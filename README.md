@@ -36,6 +36,9 @@ admin  44502   <-- админка для локалки: кик, чат, бан�
 - Статистика, лента событий, недавние выходы с причиной, каталог игр (только просмотр).
 - В каталоге видно все 3900+ ID: страницы по 300 строк, «Показать все», поиск по всей базе.
 - Темы light/dark/OLED, мягкие звуки, поиск, автообновление.
+- **16 языков** (EN/RU/UK/LT/PL/PT-BR/ES/DE/FR/IT/JA/KO/ZH/ID/TR/VI), выбор в верхней
+  панели и в настройках; язык берётся из браузера, запоминается в `localStorage`.
+  Как добавить свой — [docs/I18N.md](docs/I18N.md).
 - Никаких MAC, IP, session id, логов и кнопок модерации.
 - **Статус для списка серверов PPSSPP**: `/data.json` (и `/status.xml`) — игры, комнаты, ники,
   `game_ids` со всеми региональными алиасами. Формат и готовый JSON для заявки в PPSSPP —
@@ -217,6 +220,7 @@ src/AdHocServer/
 public/index.html                  публичная доска (data-role="public")
 public/admin.html                  админка (data-role="admin") + экран входа
 public/assets/js/{ui,sound,app}.js общий UI
+public/assets/js/i18n.js        16 языков, автодетект, селектор
 public/assets/js/crypto.js         SHA-256/HMAC/PBKDF2/CTR на ES5
 public/assets/js/auth.js           клиент админского API (подпись + шифрование)
 data/games.json                    база названий (создаётся/правится автоматически)
@@ -233,6 +237,7 @@ tools/hold-client.ps1              «держатель» сессии для р
 docs/PROTOCOL.md                   байтовый формат пакетов
 docs/ARCHITECTURE.md               потоки, блокировки, отказоустойчивость
 docs/API.md                        HTTP API
+docs/I18N.md                       языки интерфейса, как добавить свой
 docs/RELAY.md                      ретранслятор: зачем, как включить, протокол
 docs/SERVER_LIST.md                /data.json и заявка в список серверов PPSSPP
 docs/SECURITY.md                   модель угроз, подпись/шифрование, reverse proxy

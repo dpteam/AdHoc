@@ -61,8 +61,8 @@ var API = (function () {
           }, parsed, raw);
         }
       };
-      x.ontimeout = function () { finish({ status: 0, message: 'таймаут запроса' }); };
-      x.onerror = function () { finish({ status: 0, message: 'нет связи с сервером' }); };
+      x.ontimeout = function () { finish({ status: 0, message: I18N.t('net.timeout') }); };
+      x.onerror = function () { finish({ status: 0, message: I18N.t('net.offline') }); };
       x.send(body === null || body === undefined ? null : body);
     } catch (err) {
       finish({ status: 0, message: err.message || 'request failed' });
@@ -78,12 +78,12 @@ var API = (function () {
     var t = explicitToken !== undefined ? explicitToken : (UI.read('dpt.token', '') || '');
     if (!t) {
       ready = false;
-      cb({ auth: true, message: 'нужен admin token' });
+      cb({ auth: true, message: I18N.t('auth.required') });
       return;
     }
     xhr('GET', url('/api/auth'), null, 8000, null, function (err, data) {
       if (err) { cb(err); return; }
-      if (!data || !data.salt) { cb({ status: 0, message: 'сервер не вернул параметры входа' }); return; }
+      if (!data || !data.salt) { cb({ status: 0, message: I18N.t('auth.badSalt') }); return; }
       try {
         var started = new Date().getTime();
         token = t;
@@ -99,7 +99,7 @@ var API = (function () {
         cb(null);
       } catch (e) {
         ready = false;
-        cb({ status: 0, message: 'ошибка криптографии: ' + e.message });
+        cb({ status: 0, message: I18N.t('auth.cryptoError') + ': ' + e.message });
       }
     });
   }
@@ -125,7 +125,7 @@ var API = (function () {
     }
 
     if (!ready || !key) {
-      cb({ auth: true, message: 'сессия администратора не открыта' });
+      cb({ auth: true, message: I18N.t('auth.expired') });
       return;
     }
 
@@ -155,13 +155,13 @@ var API = (function () {
 
     xhr(method, url(target), wire, opts.timeout, headers, function (err, data, raw, x) {
       if (!err && x && x.getResponseHeader && x.getResponseHeader('X-Enc-Resp') === '1') {
-        if (!raw) { cb({ status: 0, message: 'пустой зашифрованный ответ' }); return; }
+        if (!raw) { cb({ status: 0, message: I18N.t('auth.emptyResponse') }); return; }
         var bytes = DptCrypto.open(key, raw.replace(/\s+/g, ''));
-        if (!bytes) { cb({ status: 0, message: 'не удалось расшифровать ответ' }); return; }
+        if (!bytes) { cb({ status: 0, message: I18N.t('auth.decryptFailed') }); return; }
         try {
           data = JSON.parse(DptCrypto.utf8Decode(bytes));
         } catch (e) {
-          cb({ status: 0, message: 'битый зашифрованный ответ' });
+          cb({ status: 0, message: I18N.t('auth.badResponse') });
           return;
         }
       }

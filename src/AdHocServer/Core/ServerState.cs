@@ -8,6 +8,8 @@ namespace Dpt.AdHoc.Core
     {
         public string Id = "";
         public string RawId = "";
+        /// <summary>Every raw product code seen for this game (e.g. EU and US copies).</summary>
+        public readonly List<string> RawIds = new List<string>();
         public string Name = "";
         public readonly List<GroupEntry> Groups = new List<GroupEntry>();
         public readonly List<ClientSession> Sessions = new List<ClientSession>();

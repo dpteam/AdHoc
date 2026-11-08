@@ -623,6 +623,9 @@ namespace Dpt.AdHoc.Net
                     _state.Games[resolved] = game;
                     newGame = true;
                 }
+
+                // remember every regional copy that showed up (EU and US players in one lobby)
+                if (rawCode.Length > 0 && !game.RawIds.Contains(rawCode)) game.RawIds.Add(rawCode);
                 game.LastActivityUtc = DateTime.UtcNow;
                 game.Sessions.Add(s);
                 game.TotalPlayers++;

@@ -306,11 +306,29 @@ namespace Dpt.AdHoc.Web
                 for (int gi = 0; gi < games.Count; gi++)
                 {
                     GameEntry g = games[gi];
+
+                    // Product codes are public data. Derive them from the players who are in the
+                    // lobby right now, so an EU copy is not silently reported as its US crosslink.
+                    List<string> raws = new List<string>();
+                    for (int si = 0; si < g.Sessions.Count; si++)
+                    {
+                        string raw = g.Sessions[si].RawProductCode;
+                        if (string.IsNullOrEmpty(raw) || string.Equals(raw, g.Id, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (raws.Contains(raw)) continue;
+                        raws.Add(raw);
+                        if (raws.Count >= 8) break;
+                    }
+                    // one regional copy in the lobby -> show its own name and id, not the canonical one
+                    string shownId = raws.Count == 1 ? raws[0] : g.Id;
+
                     jb.BeginObject();
                     jb.Prop("id", g.Id);
                     if (!redact) jb.Prop("rawId", g.RawId);
-                    jb.Prop("name", db.DisplayName(g.Id));
-                    jb.Prop("known", db.HasTitle(g.Id));
+                    jb.Name("rawIds").BeginArray();
+                    for (int ri = 0; ri < raws.Count; ri++) jb.Str(raws[ri]);
+                    jb.EndArray();
+                    jb.Prop("name", db.DisplayName(shownId));
+                    jb.Prop("known", db.HasTitle(shownId));
                     jb.Prop("players", g.Sessions.Count);
                     jb.Prop("peak", g.PeakPlayers);
                     jb.Prop("totalPlayers", g.TotalPlayers);

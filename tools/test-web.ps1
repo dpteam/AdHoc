@@ -101,6 +101,10 @@ try {
     Assert ($null -ne $mhf) 'public sees the game' ''
     Assert (@(($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).members).Count -eq 2) 'public sees group members' ''
 
+    # a crosslinked regional copy must be visible as such, not silently renamed to the US id
+    $mhfRaw = @($mhf.rawIds)
+    Assert ($mhfRaw -contains 'ULES00318') 'regional copy listed in rawIds' ("rawIds=" + ($mhfRaw -join ','))
+
     # Game Share sends 000000001 - the board must show a label, not the bare code
     $share = $status.games | Where-Object { $_.id -eq '000000001' }
     if ($null -ne $share) {

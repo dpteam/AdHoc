@@ -880,6 +880,11 @@ namespace Dpt.AdHoc.Net
                     else _byMac[macKey] = macCount - 1;
                 }
 
+                // Stamp the moment the relay was last used, not just the moment it was opened:
+                // games keep one PDP session alive for minutes, and a stale stamp made the
+                // mixed-transport check report "no relay" for a player who had it on.
+                _byMacSeen[macKey] = DateTime.UtcNow;
+
                 RelayConn peer = c.Peer;
                 if (peer != null)
                 {

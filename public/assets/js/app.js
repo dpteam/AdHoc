@@ -500,8 +500,17 @@
     html.push('<span class="game-title' + (g.known ? '' : ' unknown') + '">' + UI.esc(g.name || g.id) +
       (g.known ? '' : ' <i class="fas fa-circle-question" title="' + I18N.t('chip.unknown') + '"></i>') + '</span>');
     html.push('<span class="game-meta-line">');
-    html.push('<span class="chip id">' + UI.esc(g.id) + '</span>');
-    if (g.rawId && g.rawId !== g.id) html.push('<span class="chip link" title="' + I18N.t('chip.crosslink') + '"><i class="fas fa-link"></i>' + UI.esc(g.rawId) + '</span>');
+    // Show the id the players actually run. Crosslink merges regions, so an EU copy would
+    // otherwise look like a US one and confuse everyone ("why is my ULES game shown as ULUS?").
+    var raws = (g.rawIds || []).slice();
+    if (g.rawId && raws.indexOf(g.rawId) < 0) raws.push(g.rawId);
+    var primary = (raws.length === 1 && raws[0] !== g.id) ? raws[0] : g.id;
+    html.push('<span class="chip id">' + UI.esc(primary) + '</span>');
+    var secondary = [g.id].concat(raws);
+    for (var ri = 0; ri < secondary.length; ri++) {
+      if (!secondary[ri] || secondary[ri] === primary) continue;
+      html.push('<span class="chip link" title="' + I18N.t('chip.crosslink') + '"><i class="fas fa-link"></i>' + UI.esc(secondary[ri]) + '</span>');
+    }
     if (!g.known && IS_ADMIN) html.push('<span class="chip" data-name-game="' + UI.esc(g.id) + '" role="button" tabindex="0" title="' + I18N.t('chip.editName') + '"><i class="fas fa-pen"></i> ' + I18N.t('chip.editName') + '</span>');
     html.push('<span>' + I18N.t('lobby.peakTotal', UI.fmtInt(g.peak), UI.fmtInt(g.totalPlayers)) + '</span>');
     html.push('<span class="game-time" data-activity="' + UI.esc(g.id) + '">' + UI.ago(g.lastActivityUtc) + '</span>');

@@ -1028,10 +1028,21 @@ namespace Dpt.AdHoc.Net
                             c.Close("lifetime");
                             continue;
                         }
-                        if (idleLimit > 0 && c.Peer == null && c.Idle.TotalSeconds >= idleLimit)
-                        {
-                            c.Close("idle");
-                        }
+                        if (idleLimit <= 0 || c.Peer != null) continue;
+
+                        // A PTP_LISTEN socket is silent by design: the client opens it and waits
+                        // for 10-byte notices, it never sends anything itself. Reaping it after
+                        // idleSeconds killed live matches (Killzone Liberation crashed after
+                        // ~10 minutes because its listen socket was closed mid-game).
+                        if (c.Kind == 1) continue;
+
+                        // Sessions that already relayed frames may just be sitting in a menu;
+                        // give them a much longer grace before assuming the client is gone.
+                        // A session that never carried a single frame (only the INIT handshake)
+                        // is a leftover from a client that vanished - reap it at the short limit.
+                        double limit = c.Frames > 0 ? Math.Max(idleLimit * 4, 1800) : idleLimit;
+
+                        if (c.Idle.TotalSeconds >= limit) c.Close("idle");
                     }
                 }
                 catch (Exception ex)

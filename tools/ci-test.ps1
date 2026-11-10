@@ -59,6 +59,7 @@ Write-Host ("server up: pid " + $proc.Id)
 $suites = @(
     @{ name = 'protocol'; script = 'tools\test-client.ps1' },
     @{ name = 'relay';    script = 'tools\test-relay.ps1'  },
+    @{ name = 'relay-idle'; script = 'tools\test-relay-idle.ps1' },
     @{ name = 'web';      script = 'tools\test-web.ps1'    }
 )
 

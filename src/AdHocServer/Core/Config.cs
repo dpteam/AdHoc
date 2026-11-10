@@ -248,7 +248,7 @@ namespace Dpt.AdHoc.Core
             RelayPort = Clamp(RelayPort, 1, 65535);
             RelayMaxSessions = Clamp(RelayMaxSessions, 8, 8192);
             RelayMaxPerIp = Clamp(RelayMaxPerIp, 1, 4096);
-            RelayIdleSeconds = Clamp(RelayIdleSeconds, 30, 86400);
+            RelayIdleSeconds = Clamp(RelayIdleSeconds, 5, 86400);
             RelayLifetimeSeconds = Clamp(RelayLifetimeSeconds, 60, 172800);
             RelayMaxPdpBytes = Clamp(RelayMaxPdpBytes, 512, 65536);
             ListenBacklog = Clamp(ListenBacklog, 8, 4096);

@@ -1,0 +1,26 @@
+fix(relay): never reap a silent PTP_LISTEN socket (Killzone Liberation crashed)
+
+The 10.11 log shows a healthy 35-minute Killzone match (2.5 MB each way, no
+drops after the first seconds) that ended with both clients leaving and one
+reconnecting 10 s later - a client restart. Right next to it:
+
+  00:35:11 kind=1 name="PTP_LISTEN ..." reason=idle
+  00:45:16 same,  00:55:21 same
+
+Every 10 minutes (relay.idleSeconds=600) the sweep closed both players'
+listening sockets. Across all logs: 40 idle reaps of PTP_LISTEN vs 3 of PDP.
+
+A listen socket is silent by design: the client opens it and waits for 10-byte
+connect notices, it never sends anything. The generic idle rule treated that
+as dead, the game kept thinking it was listening, and the next connect attempt
+(mid-match reconnect, new round) hit a closed socket.
+
+- PTP_LISTEN is never idle-closed (lifetimeSeconds still applies)
+- sessions that already relayed a frame get max(idleSeconds*4, 1800) of grace,
+  so a long menu does not look dead; the short limit only reaps sessions that
+  never carried a single frame
+- Config.Normalize: idleSeconds floor lowered 30 -> 5 so it can be tested
+- new tools/test-relay-idle.ps1: spawns a sandboxed server with idleSeconds=5
+  and asserts a silent listener survives and still receives notices while an
+  unused PDP session is reaped; wired into tools/ci-test.ps1
+- docs/RELAY.md: session-timeout table; README troubleshooting row

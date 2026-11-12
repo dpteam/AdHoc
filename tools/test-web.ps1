@@ -85,21 +85,39 @@ try {
     # ------------------------------------------------------------ public
     Write-Host "public board" -ForegroundColor Cyan
 
+    # Wait for the exact state the assertions need, not for "something showed up":
+    # the two holders join ~130 ms apart, so a loose condition snapshots the lobby
+    # with a single member and fails intermittently on slow CI runners.
     $status = $null
-    for ($i = 0; $i -lt 24; $i++) {
+    for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 300
         try { $status = Get-Json ($PublicBase + '/api/status') } catch { $status = $null }
         if ($null -eq $status) { continue }
         $probe = @($status.games | Where-Object { $_.id -eq 'ULUS10084' -and @($_.groups).Count -ge 1 })
-        if ($status.stats.online -ge 3 -and $probe.Count -ge 1) { break }
+        $members = 0
+        if ($probe.Count -ge 1) {
+            $grp = @($probe[0].groups | Where-Object { $_.name -eq 'ABCD1234' })
+            if ($grp.Count -ge 1) { $members = @($grp[0].members).Count }
+        }
+        if ($status.stats.online -ge 3 -and $members -eq 2) { break }
     }
+
+    # the Game Share holder is optional: give it a moment, then carry on either way
+    for ($i = 0; $i -lt 10; $i++) {
+        if (@($status.games | Where-Object { $_.id -eq '000000001' }).Count -ge 1) { break }
+        Start-Sleep -Milliseconds 300
+        try { $status = Get-Json ($PublicBase + '/api/status') } catch { }
+    }
+
     Assert ($null -ne $status) 'public status reachable' ''
     Assert ($status.role -eq 'public') 'public role reported' $status.role
     Assert ($status.stats.online -ge 3) 'three sessions online' ("online=" + $status.stats.online)
 
     $mhf = $status.games | Where-Object { $_.id -eq 'ULUS10084' }
     Assert ($null -ne $mhf) 'public sees the game' ''
-    Assert (@(($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' }).members).Count -eq 2) 'public sees group members' ''
+    $mhfGroup = @($mhf.groups | Where-Object { $_.name -eq 'ABCD1234' })
+    $mhfMembers = if ($mhfGroup.Count -ge 1) { @($mhfGroup[0].members).Count } else { 0 }
+    Assert ($mhfMembers -eq 2) 'public sees group members' ("members=" + $mhfMembers + " groups=" + @($mhf.groups).Count)
 
     # a crosslinked regional copy must be visible as such, not silently renamed to the US id
     $mhfRaw = @($mhf.rawIds)
@@ -225,8 +243,11 @@ try {
         Assert ($replay.ok -eq $false) 'captcha is single-use' ("error=" + $replay.error)
         Assert ($replay.error -eq 'cooldown' -or $replay.error -eq 'captcha') 'replay blocked by cooldown/captcha' ("error=" + $replay.error)
 
-        $after = Get-Json ($PublicBase + '/api/chat?since=0&limit=20')
-        Assert (@($after.messages | Where-Object { $_.text -eq 'hello from the test suite' }).Count -eq 1) 'message is in the log' ''
+        # match by sequence number: the chat log is persisted across restarts, so counting
+        # messages with the same text breaks as soon as the suite runs twice on one machine
+        $after = Get-Json ($PublicBase + '/api/chat?since=0&limit=200')
+        $posted = @($after.messages | Where-Object { $_.seq -eq $goodSend.message.seq })
+        Assert ($posted.Count -eq 1) 'message is in the log' ("seq=" + $goodSend.message.seq + " found=" + $posted.Count)
     } else {
         Write-Host "  [skip] captcha solving (server log is not at Debug level)" -ForegroundColor Yellow
     }
